@@ -4,6 +4,11 @@ A modern desktop application for restoring SQL Server databases from Azure Blob 
 
 ![Screenshot - Main Interface](docs/screenshots/main-interface.png)
 
+### Download Release
+
+Download the latest release from the [Releases page](https://github.com/jakemorgangit/SQLRestoreFromBlob/releases).
+
+
 ## Features
 
 ### Azure Blob Storage Integration
