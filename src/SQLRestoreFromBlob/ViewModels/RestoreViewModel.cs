@@ -18,6 +18,8 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly CredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
+    private List<BackupSet> _allSets = [];
+    private List<BackupSet> _dbSets = [];
 
     #region Observable Properties
 
@@ -31,29 +33,38 @@ public partial class RestoreViewModel : ViewModelBase
     private bool _backupsLoaded;
 
     [ObservableProperty]
+    private ObservableCollection<string> _discoveredServers = [];
+
+    [ObservableProperty]
+    private string? _selectedServerName;
+
+    [ObservableProperty]
+    private ObservableCollection<string> _discoveredDatabases = [];
+
+    [ObservableProperty]
+    private string? _selectedDatabaseName;
+
+    [ObservableProperty]
     private string _targetDatabaseName = string.Empty;
 
-    // Timeline
+    // Restore points (replaces continuous slider)
     [ObservableProperty]
-    private DateTime _timelineMin = DateTime.Now.AddDays(-7);
+    private ObservableCollection<RestorePoint> _restorePoints = [];
 
     [ObservableProperty]
-    private DateTime _timelineMax = DateTime.Now;
+    private RestorePoint? _selectedRestorePoint;
 
     [ObservableProperty]
-    private double _timelineSliderMin;
+    private bool _hasRestorePoints;
 
     [ObservableProperty]
-    private double _timelineSliderMax = 100;
+    private string _restoreWindowText = string.Empty;
 
     [ObservableProperty]
-    private double _timelineSliderValue = 100;
+    private ObservableCollection<TimelineTick> _timelineTicks = [];
 
     [ObservableProperty]
-    private DateTime _selectedDateTime = DateTime.Now;
-
-    [ObservableProperty]
-    private string _selectedDateTimeDisplay = string.Empty;
+    private int _timelineHeight = 60;
 
     // Restore chain
     [ObservableProperty]
@@ -68,6 +79,12 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasValidChain;
 
+    [ObservableProperty]
+    private bool _showChainDetails;
+
+    [ObservableProperty]
+    private ObservableCollection<BackupSet> _chainSets = [];
+
     // Options
     [ObservableProperty]
     private bool _withReplace = true;
@@ -77,7 +94,7 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool IsStandbyMode => RecoveryMode == RecoveryMode.Standby;
 
-    partial void OnRecoveryModeChanged(RecoveryMode value) => OnPropertyChanged(nameof(IsStandbyMode));
+    // OnRecoveryModeChanged is defined later to also update restore summary
 
     [ObservableProperty]
     private string _standbyFilePath = string.Empty;
@@ -98,7 +115,46 @@ public partial class RestoreViewModel : ViewModelBase
     private bool _newBroker;
 
     [ObservableProperty]
-    private string _sqlCredentialName = "BlobRestoreCredential";
+    private bool _useWithMove;
+
+    public bool ShowMoveOptions => UseWithMove;
+
+    public ServerConnection? ConnectedServer { get; set; }
+
+    partial void OnUseWithMoveChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowMoveOptions));
+        if (value)
+            _ = FetchDefaultPathsAsync();
+        UpdateRestoreSummary();
+    }
+
+    [ObservableProperty]
+    private string _moveDataFilePath = string.Empty;
+
+    [ObservableProperty]
+    private string _moveLogFilePath = string.Empty;
+
+    [ObservableProperty]
+    private bool _isFetchingPaths;
+
+    [ObservableProperty]
+    private bool _pathsFromServer;
+
+    [ObservableProperty]
+    private string _pathSourceText = string.Empty;
+
+    [ObservableProperty]
+    private string _restoreSummaryText = string.Empty;
+
+    [ObservableProperty]
+    private string _sqlCredentialName = string.Empty;
+
+    partial void OnSelectedContainerChanged(BlobContainerConfig? value)
+    {
+        if (value != null)
+            SqlCredentialName = value.ContainerUrl;
+    }
 
     [ObservableProperty]
     private ObservableCollection<FileMoveOption> _fileMoves = [];
@@ -132,6 +188,17 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _executionSuccess;
 
+    [ObservableProperty]
+    private bool _isExecuteArmed;
+
+    [ObservableProperty]
+    private int _executeCountdown;
+
+    [ObservableProperty]
+    private string _executeButtonText = "Execute on Server";
+
+    private CancellationTokenSource? _armTimeoutCts;
+
     // Backup summary
     [ObservableProperty]
     private int _fullCount;
@@ -141,6 +208,9 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private int _logCount;
+
+    [ObservableProperty]
+    private int _setCount;
 
     #endregion
 
@@ -156,11 +226,12 @@ public partial class RestoreViewModel : ViewModelBase
         _chainBuilder = chainBuilder;
         _scriptGenerator = scriptGenerator;
         _credentialStore = credentialStore;
-        LoadContainers();
+        RefreshContainers();
     }
 
-    private void LoadContainers()
+    public void RefreshContainers()
     {
+        var previous = SelectedContainer?.Name;
         var config = _credentialStore.LoadConfig();
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
@@ -168,16 +239,95 @@ public partial class RestoreViewModel : ViewModelBase
             var sas = _credentialStore.GetSasToken(c);
             if (sas != null) c.CacheSasToken(sas);
         }
+        if (previous != null)
+            SelectedContainer = Containers.FirstOrDefault(c => c.Name == previous);
+        if (SelectedContainer == null && Containers.Count > 0)
+            SelectedContainer = Containers[0];
     }
 
-    partial void OnTimelineSliderValueChanged(double value)
+    partial void OnSelectedServerNameChanged(string? value)
     {
-        if (!BackupsLoaded) return;
-        var range = (TimelineMax - TimelineMin).TotalSeconds;
-        var seconds = (value / 100.0) * range;
-        SelectedDateTime = TimelineMin.AddSeconds(seconds);
-        SelectedDateTimeDisplay = SelectedDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-        RebuildChain();
+        if (_allSets.Count == 0) return;
+
+        var filtered = _allSets.AsEnumerable();
+        if (!string.IsNullOrEmpty(value))
+            filtered = filtered.Where(s =>
+            {
+                var parts = value.Split('\\', 2);
+                return string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
+            });
+
+        var dbs = filtered
+            .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
+            .Select(s => s.DatabaseName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        DiscoveredDatabases = new ObservableCollection<string>(dbs);
+        if (DiscoveredDatabases.Count > 0)
+            SelectedDatabaseName = DiscoveredDatabases[0];
+    }
+
+    partial void OnSelectedDatabaseNameChanged(string? value)
+    {
+        if (value == null || _allSets.Count == 0) return;
+
+        _dbSets = _allSets
+            .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (!string.IsNullOrEmpty(SelectedServerName))
+        {
+            var parts = SelectedServerName.Split('\\', 2);
+            _dbSets = _dbSets.Where(s =>
+                string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
+        DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
+        LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
+        SetCount = _dbSets.Count;
+
+        TargetDatabaseName = value;
+        AutoPopulateMoveDefaults();
+
+        ComputeAndDisplayRestorePoints();
+    }
+
+    [RelayCommand]
+    private void SelectRestorePoint(RestorePoint? point)
+    {
+        if (point != null)
+            SelectedRestorePoint = point;
+    }
+
+    [RelayCommand]
+    private void ToggleChainDetails()
+    {
+        ShowChainDetails = !ShowChainDetails;
+    }
+
+    partial void OnSelectedRestorePointChanged(RestorePoint? value)
+    {
+        ShowChainDetails = false;
+        if (value == null)
+        {
+            RestoreChain = null;
+            HasValidChain = false;
+            ChainFiles.Clear();
+            ChainSets.Clear();
+            ChainSummary = string.Empty;
+            return;
+        }
+
+        var chain = _chainBuilder.BuildChainFromRestorePoint(value);
+        RestoreChain = chain;
+        HasValidChain = true;
+        ChainFiles = new ObservableCollection<BackupFileInfo>(chain.AllFiles);
+        ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
+        ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
+        UpdateRestoreSummary();
     }
 
     [RelayCommand]
@@ -194,35 +344,34 @@ public partial class RestoreViewModel : ViewModelBase
         try
         {
             _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer);
+            _allSets = _blobService.GroupIntoBackupSets(_allBackups);
 
-            FullCount = _allBackups.Count(b => b.Type == BackupType.Full);
-            DiffCount = _allBackups.Count(b => b.Type == BackupType.Differential);
-            LogCount = _allBackups.Count(b => b.Type == BackupType.TransactionLog);
+            var servers = _blobService.GetDiscoveredServers(_allBackups);
+            DiscoveredServers = new ObservableCollection<string>(servers);
 
-            var window = _chainBuilder.GetRestoreWindow(_allBackups);
-            if (window == null)
+            var dbs = _blobService.GetDiscoveredDatabases(_allBackups);
+            DiscoveredDatabases = new ObservableCollection<string>(dbs);
+            BackupsLoaded = _allBackups.Count > 0;
+
+            if (DiscoveredServers.Count > 0)
             {
-                SetError("No full backups found in container. Cannot build a restore chain.");
-                BackupsLoaded = false;
-                return;
+                SelectedServerName = DiscoveredServers[0];
+            }
+            else if (DiscoveredDatabases.Count > 0)
+            {
+                SelectedDatabaseName = DiscoveredDatabases[0];
+            }
+            else
+            {
+                _dbSets = _allSets;
+                FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
+                DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
+                LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
+                SetCount = _dbSets.Count;
+                ComputeAndDisplayRestorePoints();
             }
 
-            TimelineMin = window.Value.earliest;
-            TimelineMax = window.Value.latest;
-            TimelineSliderValue = 100;
-            SelectedDateTime = TimelineMax;
-            SelectedDateTimeDisplay = SelectedDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-            BackupsLoaded = true;
-
-            if (_allBackups.Count > 0 && string.IsNullOrEmpty(TargetDatabaseName))
-            {
-                var dbName = _allBackups.FirstOrDefault(b => !string.IsNullOrEmpty(b.DatabaseName))?.DatabaseName;
-                if (!string.IsNullOrEmpty(dbName))
-                    TargetDatabaseName = dbName;
-            }
-
-            RebuildChain();
-            SetStatus($"Loaded {_allBackups.Count} backups. Restore window: {TimelineMin:yyyy-MM-dd HH:mm} to {TimelineMax:yyyy-MM-dd HH:mm}");
+            SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
         catch (Exception ex)
         {
@@ -235,23 +384,260 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
-    private void RebuildChain()
+    private void ComputeAndDisplayRestorePoints()
     {
-        var chain = _chainBuilder.BuildChain(_allBackups, SelectedDateTime);
-        RestoreChain = chain;
-        HasValidChain = chain != null;
+        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
 
-        if (chain != null)
+        // Compute timeline positions (0-1)
+        if (points.Count > 1)
         {
-            ChainFiles = new ObservableCollection<BackupFileInfo>(chain.AllFiles);
-            ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {SelectedDateTime:yyyy-MM-dd HH:mm:ss}";
+            var minTicks = points.First().Timestamp.Ticks;
+            var maxTicks = points.Last().Timestamp.Ticks;
+            var range = (double)(maxTicks - minTicks);
+            foreach (var p in points)
+                p.TimelinePosition = range > 0 ? (p.Timestamp.Ticks - minTicks) / range : 0.5;
+        }
+        else if (points.Count == 1)
+        {
+            points[0].TimelinePosition = 0.5;
+        }
+
+        // Compute vertical stacking rows to avoid horizontal overlap
+        ComputeRows(points);
+
+        RestorePoints = new ObservableCollection<RestorePoint>(points);
+        HasRestorePoints = points.Count > 0;
+
+        if (points.Count > 0)
+        {
+            var first = points.First().Timestamp;
+            var last = points.Last().Timestamp;
+            RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
+
+            // Compute time-interval tick marks
+            TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
+
+            // Timeline height based on max row
+            int maxRow = points.Max(p => p.Row);
+            TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
+
+            SelectedRestorePoint = points.Last();
+            ClearStatus();
         }
         else
         {
-            ChainFiles.Clear();
-            ChainSummary = "No valid restore chain available for selected time.";
+            RestoreWindowText = string.Empty;
+            TimelineTicks.Clear();
+            TimelineHeight = 50;
+            SetError("No valid restore points found. Ensure there is at least one full backup.");
         }
     }
+
+    private static void ComputeRows(List<RestorePoint> points)
+    {
+        const double minSeparation = 0.025;
+        var rows = new List<List<double>>();
+
+        foreach (var p in points)
+        {
+            bool placed = false;
+            for (int row = 0; row < rows.Count; row++)
+            {
+                bool overlaps = rows[row].Any(pos => Math.Abs(pos - p.TimelinePosition) < minSeparation);
+                if (!overlaps)
+                {
+                    p.Row = row;
+                    rows[row].Add(p.TimelinePosition);
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed)
+            {
+                p.Row = rows.Count;
+                rows.Add([p.TimelinePosition]);
+            }
+        }
+    }
+
+    private static List<TimelineTick> ComputeTicks(DateTime first, DateTime last)
+    {
+        var ticks = new List<TimelineTick>();
+        var range = last - first;
+        var totalTicks = (double)(last.Ticks - first.Ticks);
+        if (totalTicks <= 0) return ticks;
+
+        // Choose interval based on range
+        TimeSpan interval;
+        string format;
+        if (range.TotalDays > 60)
+        {
+            interval = TimeSpan.FromDays(14);
+            format = "MMM dd";
+        }
+        else if (range.TotalDays > 14)
+        {
+            interval = TimeSpan.FromDays(7);
+            format = "MMM dd";
+        }
+        else if (range.TotalDays > 3)
+        {
+            interval = TimeSpan.FromDays(1);
+            format = "MMM dd";
+        }
+        else if (range.TotalHours > 12)
+        {
+            interval = TimeSpan.FromHours(6);
+            format = "HH:mm";
+        }
+        else
+        {
+            interval = TimeSpan.FromHours(1);
+            format = "HH:mm";
+        }
+
+        // Round start to the next clean interval boundary
+        var cursor = RoundUp(first, interval);
+
+        while (cursor < last)
+        {
+            double pos = (cursor.Ticks - first.Ticks) / totalTicks;
+            if (pos >= 0.02 && pos <= 0.98)
+            {
+                ticks.Add(new TimelineTick { Position = pos, Label = cursor.ToString(format) });
+            }
+            cursor += interval;
+        }
+
+        return ticks;
+    }
+
+    private static DateTime RoundUp(DateTime dt, TimeSpan interval)
+    {
+        if (interval.TotalDays >= 1)
+        {
+            var next = dt.Date.AddDays(1);
+            while (next <= dt) next = next.AddDays((int)interval.TotalDays);
+            return next;
+        }
+        var ticks = (dt.Ticks + interval.Ticks - 1) / interval.Ticks * interval.Ticks;
+        return new DateTime(ticks);
+    }
+
+    private void AutoPopulateMoveDefaults()
+    {
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return;
+
+        if (!string.IsNullOrEmpty(MoveDataFilePath))
+        {
+            var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? string.Empty;
+            var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
+            MoveDataFilePath = Path.Combine(dataDir, $"{TargetDatabaseName}.mdf");
+            MoveLogFilePath = Path.Combine(logDir, $"{TargetDatabaseName}_log.ldf");
+        }
+    }
+
+    [RelayCommand]
+    private async Task FetchDefaultPathsAsync()
+    {
+        if (ConnectedServer == null)
+        {
+            var fallbackDir = @"C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA";
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+            MoveDataFilePath = Path.Combine(fallbackDir, $"{dbName}.mdf");
+            MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
+            PathsFromServer = false;
+            PathSourceText = "Not connected — using generic placeholder paths. Connect to a SQL Server to auto-detect the correct default directories.";
+            return;
+        }
+
+        IsFetchingPaths = true;
+        PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
+        try
+        {
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(ConnectedServer);
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+
+            if (!string.IsNullOrEmpty(dataPath))
+                MoveDataFilePath = Path.Combine(dataPath, $"{dbName}.mdf");
+
+            if (!string.IsNullOrEmpty(logPath))
+                MoveLogFilePath = Path.Combine(logPath, $"{dbName}_log.ldf");
+            else if (!string.IsNullOrEmpty(dataPath))
+                MoveLogFilePath = Path.Combine(dataPath, $"{dbName}_log.ldf");
+
+            PathsFromServer = true;
+            PathSourceText = $"Paths detected from {ConnectedServer.ServerName}. You can still override them.";
+        }
+        catch (Exception ex)
+        {
+            var fallbackDir = @"C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA";
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+            MoveDataFilePath = Path.Combine(fallbackDir, $"{dbName}.mdf");
+            MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
+            PathsFromServer = false;
+            PathSourceText = $"Could not fetch paths: {ex.Message}. Using generic placeholders.";
+        }
+        finally
+        {
+            IsFetchingPaths = false;
+        }
+    }
+
+    private void UpdateRestoreSummary()
+    {
+        if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
+        {
+            RestoreSummaryText = string.Empty;
+            return;
+        }
+
+        var parts = new List<string>();
+        parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
+        parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
+
+        if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
+            parts.Add($"Restore to end of log backup at {SelectedRestorePoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
+
+        var optionsList = new List<string>();
+
+        if (WithReplace)
+            optionsList.Add("overwrite existing database (WITH REPLACE)");
+        if (DisconnectSessions)
+            optionsList.Add("disconnect active sessions");
+        if (UseWithMove)
+            optionsList.Add($"relocate data files (WITH MOVE)");
+
+        var recoveryDesc = RecoveryMode switch
+        {
+            RecoveryMode.Recovery => "brought online for use (RECOVERY)",
+            RecoveryMode.NoRecovery => "left in restoring state (NORECOVERY)",
+            RecoveryMode.Standby => "set to read-only standby mode (STANDBY)",
+            _ => "recovered"
+        };
+        optionsList.Add($"database will be {recoveryDesc}");
+
+        if (KeepReplication) optionsList.Add("preserve replication settings");
+        if (EnableBroker) optionsList.Add("enable Service Broker");
+        if (NewBroker) optionsList.Add("create new Service Broker ID");
+
+        if (optionsList.Count > 0)
+            parts.Add("Options: " + string.Join("; ", optionsList) + ".");
+
+        RestoreSummaryText = string.Join(" ", parts);
+    }
+
+    partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
+    partial void OnDisconnectSessionsChanged(bool value) => UpdateRestoreSummary();
+    partial void OnRecoveryModeChanged(RecoveryMode oldValue, RecoveryMode newValue)
+    {
+        OnPropertyChanged(nameof(IsStandbyMode));
+        UpdateRestoreSummary();
+    }
+    partial void OnKeepReplicationChanged(bool value) => UpdateRestoreSummary();
+    partial void OnEnableBrokerChanged(bool value) => UpdateRestoreSummary();
+    partial void OnNewBrokerChanged(bool value) => UpdateRestoreSummary();
+    partial void OnTargetDatabaseNameChanged(string value) => UpdateRestoreSummary();
 
     [RelayCommand]
     private void GenerateScript()
@@ -272,6 +658,26 @@ public partial class RestoreViewModel : ViewModelBase
             ? _credentialStore.GetSasToken(SelectedContainer)
             : null;
 
+        var fileMoves = new List<FileMoveOption>();
+        if (UseWithMove && !string.IsNullOrWhiteSpace(MoveDataFilePath))
+        {
+            var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName,
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveDataFilePath,
+                Type = "ROWS"
+            });
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName + "_log",
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveLogFilePath,
+                Type = "LOG"
+            });
+        }
+
         var options = new RestoreOptions
         {
             TargetDatabaseName = TargetDatabaseName,
@@ -280,14 +686,14 @@ public partial class RestoreViewModel : ViewModelBase
             StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
             DisconnectSessions = DisconnectSessions,
             StatsPercent = StatsPercent,
-            StopAt = RestoreChain.TransactionLogs.Count > 0 ? SelectedDateTime : null,
+            StopAt = RestoreChain.StopAt,
             KeepReplication = KeepReplication,
             EnableBroker = EnableBroker,
             NewBroker = NewBroker,
             SqlCredentialName = SqlCredentialName,
             SasToken = sasToken,
             StorageAccountUrl = SelectedContainer?.ContainerUrl,
-            FileMoves = [.. FileMoves]
+            FileMoves = fileMoves
         };
 
         GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
@@ -330,16 +736,22 @@ public partial class RestoreViewModel : ViewModelBase
         if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
             return;
 
-        var result = MessageBox.Show(
-            $"Execute restore script against {ConnectedServerName}?\n\n" +
-            $"Database: {TargetDatabaseName}\n" +
-            $"Chain: {ChainSummary}\n\n" +
-            "This operation cannot be undone.",
-            "Confirm Restore Execution",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+        if (!IsExecuteArmed)
+        {
+            IsExecuteArmed = true;
+            ExecuteButtonText = "Confirm Execute (5)";
+            ExecuteCountdown = 5;
 
-        if (result != MessageBoxResult.Yes) return;
+            _armTimeoutCts?.Cancel();
+            _armTimeoutCts = new CancellationTokenSource();
+
+            _ = RunArmCountdownAsync(_armTimeoutCts.Token);
+            return;
+        }
+
+        _armTimeoutCts?.Cancel();
+        IsExecuteArmed = false;
+        ExecuteButtonText = "Execute on Server";
 
         IsExecuting = true;
         ExecutionComplete = false;
@@ -355,7 +767,6 @@ public partial class RestoreViewModel : ViewModelBase
                 return;
             }
 
-            // Ensure credential exists on the server
             if (SelectedContainer != null)
             {
                 var sasToken = _credentialStore.GetSasToken(SelectedContainer);
@@ -392,14 +803,31 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private void RefreshContainers()
-    {
-        LoadContainers();
-    }
-
     private void AppendLog(string message)
     {
         ExecutionLog += message + "\n";
+    }
+
+    private async Task RunArmCountdownAsync(CancellationToken ct)
+    {
+        try
+        {
+            for (int i = 5; i >= 1; i--)
+            {
+                ct.ThrowIfCancellationRequested();
+                ExecuteCountdown = i;
+                ExecuteButtonText = $"Confirm Execute ({i})";
+                await Task.Delay(1000, ct);
+            }
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                IsExecuteArmed = false;
+                ExecuteButtonText = "Execute on Server";
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 }

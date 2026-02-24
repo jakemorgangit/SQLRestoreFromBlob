@@ -20,34 +20,23 @@ public class BlobStorageService
             throw new InvalidOperationException(
                 "No SAS token found. Please configure the SAS token for this container.");
 
-        var uriBuilder = new UriBuilder(config.ContainerUrl);
-        uriBuilder.Query = sasToken.TrimStart('?');
-        return new BlobContainerClient(uriBuilder.Uri);
+        var baseUrl = config.ContainerUrl.TrimEnd('/');
+        var cleanSas = sasToken.TrimStart('?');
+        var separator = baseUrl.Contains('?') ? "&" : "?";
+        var fullUri = new Uri($"{baseUrl}{separator}{cleanSas}");
+        return new BlobContainerClient(fullUri);
     }
 
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
         var client = CreateClient(config);
-        var props = await client.GetPropertiesAsync(cancellationToken: ct);
-        return props != null;
-    }
-
-    public async Task<ContainerSummary> GetContainerSummaryAsync(
-        BlobContainerConfig config, CancellationToken ct = default)
-    {
-        var files = await ListBackupFilesAsync(config, ct);
-        var summary = new ContainerSummary
+        await foreach (var _ in client.GetBlobsAsync(
+            BlobTraits.None, BlobStates.None, prefix: null, cancellationToken: ct)
+            .AsPages(pageSizeHint: 1))
         {
-            TotalFiles = files.Count,
-            FullBackups = files.Count(f => f.Type == BackupType.Full),
-            DiffBackups = files.Count(f => f.Type == BackupType.Differential),
-            LogBackups = files.Count(f => f.Type == BackupType.TransactionLog),
-            UnknownFiles = files.Count(f => f.Type == BackupType.Unknown),
-            TotalSizeBytes = files.Sum(f => f.SizeBytes),
-            EarliestBackup = files.Count > 0 ? files.Min(f => f.LastModified) : null,
-            LatestBackup = files.Count > 0 ? files.Max(f => f.LastModified) : null
-        };
-        return summary;
+            break;
+        }
+        return true;
     }
 
     public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
@@ -59,21 +48,124 @@ public class BlobStorageService
         await foreach (var blob in client.GetBlobsAsync(
             BlobTraits.Metadata, BlobStates.None, prefix: null, cancellationToken: ct))
         {
-            var backupType = InferBackupType(blob.Name);
-
             var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blob.Name}";
 
-            files.Add(new BackupFileInfo
+            var file = new BackupFileInfo
             {
                 BlobName = blob.Name,
                 BlobUrl = blobUrl,
-                Type = backupType,
+                Type = BackupType.Unknown,
                 SizeBytes = blob.Properties.ContentLength ?? 0,
                 LastModified = blob.Properties.LastModified ?? DateTimeOffset.MinValue
-            });
+            };
+
+            ParseBlobPath(file, config.PathPattern);
+
+            if (file.Type == BackupType.Unknown)
+                file.Type = InferBackupTypeFromExtension(blob.Name);
+
+            files.Add(file);
         }
 
         return files.OrderBy(f => f.LastModified).ToList();
+    }
+
+    public ContainerSummary GetContainerSummary(List<BackupFileInfo> files)
+    {
+        return new ContainerSummary
+        {
+            TotalFiles = files.Count,
+            FullBackups = files.Count(f => f.Type == BackupType.Full),
+            DiffBackups = files.Count(f => f.Type == BackupType.Differential),
+            LogBackups = files.Count(f => f.Type == BackupType.TransactionLog),
+            UnknownFiles = files.Count(f => f.Type == BackupType.Unknown),
+            TotalSizeBytes = files.Sum(f => f.SizeBytes),
+            EarliestBackup = files.Count > 0 ? files.Min(f => f.LastModified) : null,
+            LatestBackup = files.Count > 0 ? files.Max(f => f.LastModified) : null
+        };
+    }
+
+    public List<string> GetDiscoveredDatabases(List<BackupFileInfo> files)
+    {
+        return files
+            .Where(f => !string.IsNullOrEmpty(f.InferredDatabaseName))
+            .Select(f => f.InferredDatabaseName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public List<string> GetDiscoveredServers(List<BackupFileInfo> files)
+    {
+        return files
+            .Select(f =>
+            {
+                var parts = new List<string>();
+                if (!string.IsNullOrEmpty(f.InferredServerName)) parts.Add(f.InferredServerName);
+                if (!string.IsNullOrEmpty(f.InferredInstanceName)) parts.Add(f.InferredInstanceName);
+                return parts.Count > 0 ? string.Join("\\", parts) : null;
+            })
+            .Where(s => s != null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList()!;
+    }
+
+    public ContainerSummary GetSetBasedSummary(List<BackupSet> sets)
+    {
+        return new ContainerSummary
+        {
+            TotalFiles = sets.Sum(s => s.FileCount),
+            TotalSets = sets.Count,
+            FullBackups = sets.Count(s => s.Type == BackupType.Full),
+            DiffBackups = sets.Count(s => s.Type == BackupType.Differential),
+            LogBackups = sets.Count(s => s.Type == BackupType.TransactionLog),
+            UnknownFiles = sets.Count(s => s.Type == BackupType.Unknown),
+            TotalSizeBytes = sets.Sum(s => s.TotalSizeBytes),
+            EarliestBackup = sets.Count > 0 ? sets.Min(s => new DateTimeOffset(s.Timestamp)) : null,
+            LatestBackup = sets.Count > 0 ? sets.Max(s => new DateTimeOffset(s.Timestamp)) : null
+        };
+    }
+
+    /// <summary>
+    /// Groups individual backup files into logical BackupSets, handling striped backups.
+    /// </summary>
+    public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files)
+    {
+        var groups = new Dictionary<string, List<BackupFileInfo>>();
+
+        foreach (var file in files)
+        {
+            var (setId, _) = BackupSet.ParseFileName(file.FileName);
+            var key = $"{file.Type}|{file.InferredDatabaseName ?? ""}|{setId}";
+
+            if (!groups.TryGetValue(key, out var list))
+            {
+                list = [];
+                groups[key] = list;
+            }
+            list.Add(file);
+        }
+
+        var sets = new List<BackupSet>();
+        foreach (var (key, groupFiles) in groups)
+        {
+            var first = groupFiles[0];
+            var (setId, _) = BackupSet.ParseFileName(first.FileName);
+            var timestamp = BackupSet.ParseTimestamp(setId) ?? first.LastModified.DateTime;
+
+            sets.Add(new BackupSet
+            {
+                SetId = setId,
+                Type = first.Type,
+                Files = groupFiles.OrderBy(f => f.FileName).ToList(),
+                Timestamp = timestamp,
+                DatabaseName = first.InferredDatabaseName,
+                ServerName = first.InferredServerName
+            });
+        }
+
+        return sets.OrderBy(s => s.Timestamp).ToList();
     }
 
     public string BuildBlobUrlWithSas(BlobContainerConfig config, string blobName)
@@ -82,7 +174,85 @@ public class BlobStorageService
         return $"{config.ContainerUrl.TrimEnd('/')}/{blobName}?{sasToken?.TrimStart('?')}";
     }
 
-    private static BackupType InferBackupType(string blobName)
+    private static void ParseBlobPath(BackupFileInfo file, string pathPattern)
+    {
+        var patternParts = pathPattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var pathParts = file.BlobName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (pathParts.Length < patternParts.Length)
+        {
+            TryFallbackParsing(file, pathParts);
+            return;
+        }
+
+        // When blob has more segments than pattern, collapse trailing segments into FileName
+        for (int i = 0; i < patternParts.Length; i++)
+        {
+            var token = patternParts[i].Trim();
+            string value;
+
+            if (i == patternParts.Length - 1 && token.Equals("{FileName}", StringComparison.OrdinalIgnoreCase))
+            {
+                value = string.Join("/", pathParts.Skip(i));
+            }
+            else if (i < pathParts.Length)
+            {
+                value = pathParts[i];
+            }
+            else
+            {
+                continue;
+            }
+
+            if (token.Equals("{BackupType}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.Type = ParseBackupTypeFromFolder(value);
+            }
+            else if (token.Equals("{ServerName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredServerName = value;
+            }
+            else if (token.Equals("{InstanceName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredInstanceName = value;
+            }
+            else if (token.Equals("{DatabaseName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredDatabaseName = value;
+            }
+        }
+    }
+
+    private static void TryFallbackParsing(BackupFileInfo file, string[] pathParts)
+    {
+        // Try to infer what we can from whatever structure exists
+        if (pathParts.Length >= 2)
+        {
+            var firstFolder = pathParts[0].ToUpperInvariant();
+            var parsedType = ParseBackupTypeFromFolder(firstFolder);
+            if (parsedType != BackupType.Unknown)
+            {
+                file.Type = parsedType;
+                // If there are 3+ parts: type/something/filename - the middle might be db name
+                if (pathParts.Length >= 3)
+                    file.InferredDatabaseName = pathParts[^2]; // second-to-last
+            }
+        }
+    }
+
+    private static BackupType ParseBackupTypeFromFolder(string folderName)
+    {
+        var upper = folderName.ToUpperInvariant();
+        return upper switch
+        {
+            "FULL" => BackupType.Full,
+            "DIFF" or "DIFFERENTIAL" => BackupType.Differential,
+            "LOG" or "TLOG" or "TRN" or "TRANSACTIONLOG" => BackupType.TransactionLog,
+            _ => BackupType.Unknown
+        };
+    }
+
+    private static BackupType InferBackupTypeFromExtension(string blobName)
     {
         var name = blobName.ToLowerInvariant();
 
@@ -112,6 +282,7 @@ public class BlobStorageService
 public class ContainerSummary
 {
     public int TotalFiles { get; set; }
+    public int TotalSets { get; set; }
     public int FullBackups { get; set; }
     public int DiffBackups { get; set; }
     public int LogBackups { get; set; }

@@ -19,7 +19,13 @@ public class SqlServerService
         {
             DataSource = server.ServerName,
             ConnectTimeout = server.ConnectionTimeoutSeconds,
-            TrustServerCertificate = true,
+            TrustServerCertificate = server.TrustServerCertificate,
+            Encrypt = server.Encrypt switch
+            {
+                EncryptMode.Yes => SqlConnectionEncryptOption.Mandatory,
+                EncryptMode.Strict => SqlConnectionEncryptOption.Strict,
+                _ => SqlConnectionEncryptOption.Optional
+            },
             ApplicationName = "SQL Restore From Blob",
             MultipleActiveResultSets = false
         };
@@ -196,9 +202,27 @@ public class SqlServerService
         createCmd.CommandText = $@"
             CREATE CREDENTIAL [{credentialName}]
             WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
-            SECRET = @secret";
-        createCmd.Parameters.AddWithValue("@secret", cleanSas);
+            SECRET = '{cleanSas.Replace("'", "''")}'";
         await createCmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT
+            SERVERPROPERTY('InstanceDefaultDataPath') AS DefaultDataPath,
+            SERVERPROPERTY('InstanceDefaultLogPath') AS DefaultLogPath";
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+        {
+            var dataPath = reader["DefaultDataPath"]?.ToString() ?? string.Empty;
+            var logPath = reader["DefaultLogPath"]?.ToString() ?? string.Empty;
+            return (dataPath.TrimEnd('\\'), logPath.TrimEnd('\\'));
+        }
+        return (string.Empty, string.Empty);
     }
 
     private static List<string> SplitGoStatements(string sql)

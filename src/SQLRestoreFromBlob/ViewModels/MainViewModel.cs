@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SQLRestoreFromBlob.Models;
 using SQLRestoreFromBlob.Services;
 
 namespace SQLRestoreFromBlob.ViewModels;
@@ -31,6 +32,7 @@ public partial class MainViewModel : ViewModelBase
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
+    public AboutViewModel About { get; }
 
     public MainViewModel()
     {
@@ -44,6 +46,7 @@ public partial class MainViewModel : ViewModelBase
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
         BlobBrowser = new BlobBrowserViewModel(_blobService, _credentialStore);
         Restore = new RestoreViewModel(_blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore);
+        About = new AboutViewModel();
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
@@ -56,7 +59,14 @@ public partial class MainViewModel : ViewModelBase
         ConnectedServerName = e.IsConnected ? e.ServerName : "Not connected";
         Restore.IsConnectedToServer = e.IsConnected;
         Restore.ConnectedServerName = e.ServerName;
+        Restore.ConnectedServer = e.ConnectedServer;
         GlobalStatus = e.IsConnected ? $"Connected to {e.ServerName}" : "Ready";
+    }
+
+    [RelayCommand]
+    private void DisconnectSql()
+    {
+        ServerManager.DisconnectCommand.Execute(null);
     }
 
     [RelayCommand]
@@ -69,8 +79,15 @@ public partial class MainViewModel : ViewModelBase
             "SQL Servers" => ServerManager,
             "Browse Backups" => BlobBrowser,
             "Restore" => Restore,
+            "About" => About,
             _ => BlobConfig
         };
+
+        // Refresh container lists when navigating to views that depend on them
+        if (viewName is "Browse Backups")
+            BlobBrowser.RefreshContainers();
+        else if (viewName is "Restore")
+            Restore.RefreshContainers();
     }
 }
 
@@ -78,4 +95,5 @@ public class ServerConnectionChangedEventArgs : EventArgs
 {
     public bool IsConnected { get; init; }
     public string ServerName { get; init; } = string.Empty;
+    public ServerConnection? ConnectedServer { get; init; }
 }

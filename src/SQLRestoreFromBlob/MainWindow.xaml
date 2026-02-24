@@ -30,6 +30,9 @@
         <DataTemplate DataType="{x:Type vm:RestoreViewModel}">
             <views:RestoreView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:AboutViewModel}">
+            <views:AboutView />
+        </DataTemplate>
     </Window.Resources>
 
     <Grid>
@@ -67,6 +70,18 @@
                             Height="1"
                             Background="{StaticResource CardBorderBrush}"
                             Margin="16,8,16,8" />
+
+                    <!-- About Button -->
+                    <RadioButton DockPanel.Dock="Bottom"
+                                 Style="{StaticResource SidebarButton}"
+                                 Command="{Binding NavigateToCommand}"
+                                 CommandParameter="About"
+                                 Margin="0,0,0,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#x2139;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                            <TextBlock Text="About" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </RadioButton>
 
                     <!-- Connection Status -->
                     <Border DockPanel.Dock="Bottom"
@@ -153,9 +168,45 @@
             </Border>
 
             <!-- Main Content Area -->
-            <Border Grid.Column="1" Margin="0">
-                <ContentPresenter Content="{Binding CurrentView}" Margin="24,20" />
-            </Border>
+            <DockPanel Grid.Column="1">
+                <!-- Persistent Connection Status Banner -->
+                <Border DockPanel.Dock="Top"
+                        Padding="16,6"
+                        Visibility="{Binding IsConnectedToSql, Converter={StaticResource BoolToVis}}">
+                    <Border Background="#1A27AE60" CornerRadius="4" Padding="10,5">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8"
+                                         Fill="{StaticResource SuccessBrush}"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,8,0" />
+                                <TextBlock VerticalAlignment="Center"
+                                           Foreground="{StaticResource SuccessBrush}"
+                                           FontSize="12">
+                                    <Run Text="Connected to" />
+                                    <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" />
+                                </TextBlock>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Disconnect"
+                                    Command="{Binding DisconnectSqlCommand}"
+                                    Padding="10,2"
+                                    FontSize="11"
+                                    Background="Transparent"
+                                    BorderThickness="1"
+                                    BorderBrush="{StaticResource SuccessBrush}"
+                                    Foreground="{StaticResource SuccessBrush}"
+                                    Cursor="Hand"
+                                    VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </Border>
+                <ContentPresenter Content="{Binding CurrentView}" Margin="24,12,24,20" />
+            </DockPanel>
         </Grid>
 
         <!-- Status Bar -->

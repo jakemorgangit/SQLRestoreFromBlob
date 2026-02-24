@@ -5,157 +5,129 @@ namespace SQLRestoreFromBlob.Services;
 public class BackupChainBuilder
 {
     /// <summary>
-    /// Builds the optimal restore chain for a given point-in-time target.
-    /// Uses LSN metadata when available, otherwise falls back to timestamps.
+    /// Computes all valid, discrete restore points from the available backup sets.
+    /// Each restore point represents an actual time you can restore to with a valid chain.
     /// </summary>
-    public BackupChain? BuildChain(List<BackupFileInfo> allBackups, DateTime targetTime)
+    public List<RestorePoint> ComputeRestorePoints(List<BackupSet> allSets)
     {
-        var fulls = allBackups
-            .Where(b => b.Type == BackupType.Full)
-            .OrderByDescending(b => b.EffectiveDate)
-            .ToList();
+        var fulls = allSets.Where(s => s.Type == BackupType.Full).OrderBy(s => s.Timestamp).ToList();
+        var diffs = allSets.Where(s => s.Type == BackupType.Differential).OrderBy(s => s.Timestamp).ToList();
+        var logs = allSets.Where(s => s.Type == BackupType.TransactionLog).OrderBy(s => s.Timestamp).ToList();
 
-        var diffs = allBackups
-            .Where(b => b.Type == BackupType.Differential)
-            .OrderByDescending(b => b.EffectiveDate)
-            .ToList();
+        var points = new List<RestorePoint>();
 
-        var logs = allBackups
-            .Where(b => b.Type == BackupType.TransactionLog)
-            .OrderBy(b => b.EffectiveDate)
-            .ToList();
+        foreach (var full in fulls)
+        {
+            points.Add(new RestorePoint
+            {
+                Timestamp = full.Timestamp,
+                Type = BackupType.Full,
+                PrimarySet = full,
+                RequiredFullSet = full
+            });
+        }
 
-        var latestFull = fulls.FirstOrDefault(f => f.EffectiveDate <= targetTime);
-        if (latestFull == null)
-            return null;
+        // Each diff restore point requires ALL diffs since the last full (incremental chain)
+        foreach (var diff in diffs)
+        {
+            var baseFull = fulls.LastOrDefault(f => f.Timestamp <= diff.Timestamp);
+            if (baseFull == null) continue;
 
-        if (HasLsnMetadata(allBackups))
-            return BuildChainWithLsn(latestFull, diffs, logs, targetTime);
+            var allDiffsSinceFull = diffs
+                .Where(d => d.Timestamp > baseFull.Timestamp && d.Timestamp <= diff.Timestamp)
+                .OrderBy(d => d.Timestamp)
+                .ToList();
 
-        return BuildChainWithTimestamps(latestFull, diffs, logs, targetTime);
+            points.Add(new RestorePoint
+            {
+                Timestamp = diff.Timestamp,
+                Type = BackupType.Differential,
+                PrimarySet = diff,
+                RequiredFullSet = baseFull,
+                RequiredDiffSets = allDiffsSinceFull
+            });
+        }
+
+        // For transaction logs, build chains from each full forward.
+        // Includes all diffs in the full's range, then logs after the last diff.
+        foreach (var full in fulls)
+        {
+            var nextFull = fulls.FirstOrDefault(f => f.Timestamp > full.Timestamp);
+            var upperBound = nextFull?.Timestamp ?? DateTime.MaxValue;
+
+            var applicableLogs = logs
+                .Where(l => l.Timestamp > full.Timestamp && l.Timestamp < upperBound)
+                .OrderBy(l => l.Timestamp)
+                .ToList();
+
+            if (applicableLogs.Count == 0) continue;
+
+            // ALL diffs within this full's range
+            var allDiffsInRange = diffs
+                .Where(d => d.Timestamp > full.Timestamp && d.Timestamp < upperBound)
+                .OrderBy(d => d.Timestamp)
+                .ToList();
+
+            var baseTimestamp = allDiffsInRange.Count > 0
+                ? allDiffsInRange.Last().Timestamp
+                : full.Timestamp;
+
+            var chainLogs = applicableLogs
+                .Where(l => l.Timestamp >= baseTimestamp)
+                .OrderBy(l => l.Timestamp)
+                .ToList();
+
+            var logChainSoFar = new List<BackupSet>();
+            for (int i = 0; i < chainLogs.Count; i++)
+            {
+                logChainSoFar.Add(chainLogs[i]);
+
+                points.Add(new RestorePoint
+                {
+                    Timestamp = chainLogs[i].Timestamp,
+                    Type = BackupType.TransactionLog,
+                    PrimarySet = chainLogs[i],
+                    RequiredFullSet = full,
+                    RequiredDiffSets = [.. allDiffsInRange],
+                    RequiredLogSets = [.. logChainSoFar]
+                });
+            }
+        }
+
+        return points.OrderBy(p => p.Timestamp).ToList();
+    }
+
+    /// <summary>
+    /// Builds a BackupChain from a selected RestorePoint.
+    /// </summary>
+    public BackupChain BuildChainFromRestorePoint(RestorePoint restorePoint)
+    {
+        return BackupChain.FromRestorePoint(restorePoint);
     }
 
     /// <summary>
     /// Returns the available restore window (earliest possible to latest possible).
     /// </summary>
+    public (DateTime earliest, DateTime latest)? GetRestoreWindow(List<BackupSet> sets)
+    {
+        var fulls = sets.Where(s => s.Type == BackupType.Full).ToList();
+        if (fulls.Count == 0) return null;
+
+        var earliest = fulls.Min(f => f.Timestamp);
+        var latest = sets.Max(s => s.Timestamp);
+
+        return (earliest, latest);
+    }
+
+    // Keep backward compatibility for existing callers during migration
     public (DateTime earliest, DateTime latest)? GetRestoreWindow(List<BackupFileInfo> allBackups)
     {
         var fulls = allBackups.Where(b => b.Type == BackupType.Full).ToList();
         if (fulls.Count == 0) return null;
 
         var earliest = fulls.Min(f => f.EffectiveDate);
-
-        var allDates = allBackups.Select(b => b.EffectiveDate).ToList();
-        var latest = allDates.Max();
+        var latest = allBackups.Max(b => b.EffectiveDate);
 
         return (earliest, latest);
-    }
-
-    /// <summary>
-    /// Returns all valid restore points (timestamps) from the available backups.
-    /// </summary>
-    public List<DateTime> GetRestorePoints(List<BackupFileInfo> allBackups)
-    {
-        var points = new HashSet<DateTime>();
-
-        foreach (var backup in allBackups.OrderBy(b => b.EffectiveDate))
-        {
-            points.Add(backup.EffectiveDate);
-            if (backup.BackupFinishDate.HasValue)
-                points.Add(backup.BackupFinishDate.Value);
-        }
-
-        return points.OrderBy(p => p).ToList();
-    }
-
-    private static bool HasLsnMetadata(List<BackupFileInfo> backups)
-        => backups.Any(b => b.FirstLsn.HasValue);
-
-    private BackupChain BuildChainWithLsn(
-        BackupFileInfo full, List<BackupFileInfo> diffs,
-        List<BackupFileInfo> logs, DateTime targetTime)
-    {
-        var chain = new BackupChain { Full = full, StopAt = targetTime };
-
-        var applicableDiff = diffs
-            .Where(d => d.EffectiveDate <= targetTime
-                        && d.DatabaseBackupLsn == full.LastLsn)
-            .FirstOrDefault();
-
-        if (applicableDiff != null)
-        {
-            chain.Differential = applicableDiff;
-            var afterLsn = applicableDiff.LastLsn ?? 0m;
-            chain.TransactionLogs = logs
-                .Where(l => l.EffectiveDate <= targetTime
-                            && l.FirstLsn >= afterLsn)
-                .OrderBy(l => l.FirstLsn)
-                .ToList();
-        }
-        else
-        {
-            var afterLsn = full.LastLsn ?? 0m;
-            chain.TransactionLogs = logs
-                .Where(l => l.EffectiveDate <= targetTime
-                            && l.FirstLsn >= afterLsn)
-                .OrderBy(l => l.FirstLsn)
-                .ToList();
-        }
-
-        // Include the first log that covers the target time (its range spans past targetTime)
-        var coveringLog = logs
-            .Where(l => l.BackupStartDate <= targetTime
-                        && l.BackupFinishDate >= targetTime)
-            .FirstOrDefault();
-
-        if (coveringLog != null && !chain.TransactionLogs.Contains(coveringLog))
-            chain.TransactionLogs.Add(coveringLog);
-
-        return chain;
-    }
-
-    private BackupChain BuildChainWithTimestamps(
-        BackupFileInfo full, List<BackupFileInfo> diffs,
-        List<BackupFileInfo> logs, DateTime targetTime)
-    {
-        var chain = new BackupChain { Full = full, StopAt = targetTime };
-
-        var applicableDiff = diffs
-            .Where(d => d.EffectiveDate > full.EffectiveDate
-                        && d.EffectiveDate <= targetTime)
-            .FirstOrDefault();
-
-        var baseTime = full.EffectiveDate;
-
-        if (applicableDiff != null)
-        {
-            chain.Differential = applicableDiff;
-            baseTime = applicableDiff.EffectiveDate;
-        }
-
-        chain.TransactionLogs = logs
-            .Where(l => l.EffectiveDate >= baseTime && l.EffectiveDate <= targetTime)
-            .OrderBy(l => l.EffectiveDate)
-            .ToList();
-
-        // Include the log that covers the target time
-        var nextLog = logs
-            .Where(l => l.EffectiveDate > targetTime)
-            .OrderBy(l => l.EffectiveDate)
-            .FirstOrDefault();
-
-        if (nextLog != null && chain.TransactionLogs.Count > 0)
-        {
-            // Only include if there's a gap to fill to reach targetTime
-            var lastLogTime = chain.TransactionLogs.Last().EffectiveDate;
-            if (lastLogTime < targetTime)
-                chain.TransactionLogs.Add(nextLog);
-        }
-        else if (nextLog != null && chain.TransactionLogs.Count == 0)
-        {
-            chain.TransactionLogs.Add(nextLog);
-        }
-
-        return chain;
     }
 }

@@ -232,6 +232,34 @@
                                              Margin="0,0,0,16" />
                             </StackPanel>
 
+                            <!-- Encryption Options -->
+                            <TextBlock Text="ENCRYPTION" Style="{StaticResource LabelText}" />
+                            <StackPanel Margin="0,4,0,16">
+                                <RadioButton Content="Encrypt: Yes (Mandatory)"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditEncrypt, Converter={StaticResource EnumToBool}, ConverterParameter=Yes}"
+                                             Margin="0,0,0,6"
+                                             GroupName="EncryptMode"
+                                             ToolTip="Encrypts the connection to SQL Server. Recommended for all remote connections." />
+                                <RadioButton Content="Encrypt: No (Optional)"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditEncrypt, Converter={StaticResource EnumToBool}, ConverterParameter=No}"
+                                             Margin="0,0,0,6"
+                                             GroupName="EncryptMode"
+                                             ToolTip="Connection encryption is optional. The server decides whether to encrypt." />
+                                <RadioButton Content="Encrypt: Strict"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditEncrypt, Converter={StaticResource EnumToBool}, ConverterParameter=Strict}"
+                                             GroupName="EncryptMode"
+                                             ToolTip="TDS 8.0 strict encryption. Requires SQL Server 2022+ with a valid TLS certificate." />
+                            </StackPanel>
+
+                            <CheckBox Content="Trust Server Certificate"
+                                      IsChecked="{Binding EditTrustServerCert}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,16"
+                                      ToolTip="When enabled, the server certificate is accepted without validation. Common for development and self-signed certificates. Disable for production environments with valid CA-issued certificates." />
+
                             <TextBlock Text="CONNECTION TIMEOUT (SECONDS)" Style="{StaticResource LabelText}" />
                             <TextBox Text="{Binding EditTimeout, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"

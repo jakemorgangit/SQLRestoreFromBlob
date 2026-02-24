@@ -20,7 +20,7 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
             <TextBlock Text="Browse Backups"
                        Style="{StaticResource HeaderText}" />
             <TextBlock Text="View and explore backup files stored in your Azure Blob container."
@@ -28,46 +28,77 @@
                        Margin="0,4,0,0" />
         </StackPanel>
 
-        <!-- Container Selector + Load -->
-        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+        <!-- Container + Database Selector -->
+        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="SELECT CONTAINER" Style="{StaticResource LabelText}" />
-                    <ComboBox ItemsSource="{Binding Containers}"
-                              SelectedItem="{Binding SelectedContainer}"
-                              DisplayMemberPath="Name"
-                              Style="{StaticResource DarkComboBox}"
-                              Margin="0,0,12,0" />
-                </StackPanel>
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="CONTAINER" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding Containers}"
+                                  SelectedItem="{Binding SelectedContainer}"
+                                  DisplayMemberPath="Name"
+                                  Style="{StaticResource DarkComboBox}" />
+                    </StackPanel>
 
-                <Button Grid.Column="1"
-                        Content="Load Backups"
-                        Style="{StaticResource PrimaryButton}"
-                        Command="{Binding LoadBackupsCommand}"
-                        VerticalAlignment="Bottom"
-                        Margin="0,0,8,0" />
+                    <Button Grid.Column="1"
+                            Content="Load Backups"
+                            Style="{StaticResource PrimaryButton}"
+                            Command="{Binding LoadBackupsCommand}"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,8,0" />
 
-                <Button Grid.Column="2"
-                        Content="&#x21BB; Refresh"
-                        Style="{StaticResource SecondaryButton}"
-                        Command="{Binding RefreshCommand}"
-                        VerticalAlignment="Bottom"
-                        ToolTip="Refresh container list from saved configs" />
-            </Grid>
+                    <Button Grid.Column="2"
+                            Content="&#x21BB;"
+                            Style="{StaticResource SecondaryButton}"
+                            Command="{Binding RefreshCommand}"
+                            VerticalAlignment="Bottom"
+                            ToolTip="Refresh container list" />
+                </Grid>
+
+                <!-- Server + Database Filters (shown after loading) -->
+                <Grid Margin="0,12,0,0"
+                      Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="SERVER / INSTANCE" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding DiscoveredServers}"
+                                  SelectedItem="{Binding SelectedServer}"
+                                  Style="{StaticResource DarkComboBox}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                        <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding DiscoveredDatabases}"
+                                  SelectedItem="{Binding SelectedDatabase}"
+                                  Style="{StaticResource DarkComboBox}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                        <TextBlock Text="{Binding DbSummaryText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   Margin="0,0,0,8" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <!-- Summary + Filters -->
-        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,12"
                 Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
             <StackPanel>
-                <!-- Summary Stats -->
-                <Grid Margin="0,0,0,16"
+                <!-- Summary Stats (set-based, filtered) -->
+                <Grid Margin="0,0,0,12"
                       Visibility="{Binding Summary, Converter={StaticResource NullToVis}}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -78,16 +109,16 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding Summary.TotalFiles}"
-                                   FontSize="22" FontWeight="Bold"
+                        <TextBlock Text="{Binding Summary.TotalSets}"
+                                   FontSize="20" FontWeight="Bold"
                                    Foreground="{StaticResource PrimaryTextBrush}"
                                    HorizontalAlignment="Center" />
-                        <TextBlock Text="Total" Style="{StaticResource SecondaryText}"
+                        <TextBlock Text="Total Sets" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.FullBackups}"
-                                   FontSize="22" FontWeight="Bold"
+                                   FontSize="20" FontWeight="Bold"
                                    Foreground="{StaticResource AccentBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Full" Style="{StaticResource SecondaryText}"
@@ -95,7 +126,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="2" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.DiffBackups}"
-                                   FontSize="22" FontWeight="Bold"
+                                   FontSize="20" FontWeight="Bold"
                                    Foreground="{StaticResource WarningBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Diff" Style="{StaticResource SecondaryText}"
@@ -103,7 +134,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="3" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.LogBackups}"
-                                   FontSize="22" FontWeight="Bold"
+                                   FontSize="20" FontWeight="Bold"
                                    Foreground="{StaticResource SuccessBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Log" Style="{StaticResource SecondaryText}"
@@ -111,7 +142,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="4" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.TotalSizeDisplay}"
-                                   FontSize="16" FontWeight="Bold"
+                                   FontSize="14" FontWeight="Bold"
                                    Foreground="{StaticResource PrimaryTextBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Size" Style="{StaticResource SecondaryText}"
@@ -129,11 +160,10 @@
                     <TextBox Grid.Column="0"
                              Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
                              Style="{StaticResource DarkTextBox}"
-                             Margin="0,0,12,0">
-                        <TextBox.ToolTip>Filter by file name</TextBox.ToolTip>
-                    </TextBox>
+                             Margin="0,0,12,0"
+                             ToolTip="Filter by file name or database name" />
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <CheckBox Content="Full" IsChecked="{Binding ShowFull}"
                                   Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
                         <CheckBox Content="Diff" IsChecked="{Binding ShowDiff}"
@@ -158,7 +188,7 @@
                     <TextBlock Text="No backup files loaded"
                                Style="{StaticResource BodyText}"
                                HorizontalAlignment="Center" />
-                    <TextBlock Text="Select a container and click 'Load Backups' to browse files."
+                    <TextBlock Text="Select a container and click Load Backups to browse."
                                Style="{StaticResource SecondaryText}"
                                HorizontalAlignment="Center"
                                Margin="0,4,0,0" />
@@ -187,9 +217,11 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
 
-                        <DataGridTextColumn Header="File Name" Binding="{Binding BlobName}" Width="*" />
-                        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="100" />
-                        <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified, Converter={StaticResource DateToStr}}" Width="160" />
+                        <DataGridTextColumn Header="Server / Instance" Binding="{Binding InferredServerName}" Width="150" />
+                        <DataGridTextColumn Header="Database" Binding="{Binding InferredDatabaseName}" Width="150" />
+                        <DataGridTextColumn Header="File Name" Binding="{Binding FileName}" Width="*" />
+                        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="90" />
+                        <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified, Converter={StaticResource DateToStr}}" Width="150" />
                     </DataGrid.Columns>
                 </DataGrid>
 
@@ -205,13 +237,5 @@
                 </Border>
             </Grid>
         </Border>
-
-        <!-- Status -->
-        <TextBlock Grid.Row="3"
-                   Text="{Binding StatusMessage}"
-                   Style="{StaticResource SecondaryText}"
-                   VerticalAlignment="Bottom"
-                   Margin="0,0,0,-20"
-                   Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
     </Grid>
 </UserControl>

@@ -9,34 +9,28 @@ public class RestoreScriptGenerator
     {
         var sb = new StringBuilder();
         var dbName = EscapeName(options.TargetDatabaseName);
-        var hasLogs = chain.TransactionLogs.Count > 0;
+        var hasDiffs = chain.DiffSets.Count > 0;
+        var hasLogs = chain.LogSets.Count > 0;
         var usePit = options.StopAt.HasValue && hasLogs;
 
         AppendHeader(sb, options, chain);
-
         AppendCredentialBlock(sb, options);
 
         if (options.DisconnectSessions)
             AppendDisconnectSessions(sb, dbName);
 
-        AppendFullRestore(sb, chain.Full, options, chain.Differential != null || hasLogs);
+        AppendFullRestore(sb, chain.FullSet, options, hasDiffs || hasLogs);
 
-        if (chain.Differential != null)
-            AppendDiffRestore(sb, chain.Differential, options, hasLogs);
-
-        for (int i = 0; i < chain.TransactionLogs.Count; i++)
+        for (int i = 0; i < chain.DiffSets.Count; i++)
         {
-            bool isLast = i == chain.TransactionLogs.Count - 1;
-            AppendLogRestore(sb, chain.TransactionLogs[i], options, isLast, usePit);
+            bool moreDiffs = i < chain.DiffSets.Count - 1;
+            AppendDiffRestore(sb, chain.DiffSets[i], options, moreDiffs || hasLogs);
         }
 
-        if (!hasLogs && chain.Differential == null && options.RecoveryMode == RecoveryMode.Recovery)
+        for (int i = 0; i < chain.LogSets.Count; i++)
         {
-            // Full-only restore already has RECOVERY
-        }
-        else if (!hasLogs && chain.Differential != null && options.RecoveryMode == RecoveryMode.Recovery)
-        {
-            // Diff restore already has RECOVERY
+            bool isLast = i == chain.LogSets.Count - 1;
+            AppendLogRestore(sb, chain.LogSets[i], options, isLast, usePit);
         }
 
         if (options.DisconnectSessions && options.RecoveryMode == RecoveryMode.Recovery)
@@ -69,7 +63,7 @@ public class RestoreScriptGenerator
         var cleanSas = options.SasToken.TrimStart('?');
 
         sb.AppendLine("-- Create/recreate the credential for blob access");
-        sb.AppendLine($"IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = '{options.SqlCredentialName}')");
+        sb.AppendLine($"IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = '{options.SqlCredentialName.Replace("'", "''")}')");
         sb.AppendLine($"    DROP CREDENTIAL {credName};");
         sb.AppendLine();
         sb.AppendLine($"CREATE CREDENTIAL {credName}");
@@ -91,16 +85,14 @@ public class RestoreScriptGenerator
     }
 
     private static void AppendFullRestore(
-        StringBuilder sb, BackupFileInfo full, RestoreOptions options, bool moreToFollow)
+        StringBuilder sb, BackupSet fullSet, RestoreOptions options, bool moreToFollow)
     {
         var dbName = EscapeName(options.TargetDatabaseName);
-        var credName = EscapeName(options.SqlCredentialName);
         var recoveryClause = moreToFollow ? "NORECOVERY" : GetRecoveryClause(options);
 
-        sb.AppendLine($"-- Restore FULL backup: {full.BlobName}");
+        sb.AppendLine($"-- Restore FULL backup ({fullSet.FileCount} file(s)): {fullSet.SetId}");
         sb.AppendLine($"RESTORE DATABASE {dbName}");
-        sb.AppendLine($"    FROM URL = '{full.BlobUrl}'");
-        sb.AppendLine($"    WITH CREDENTIAL = '{options.SqlCredentialName}',");
+        AppendFromUrls(sb, fullSet, options);
 
         if (options.WithReplace)
             sb.AppendLine("         REPLACE,");
@@ -114,15 +106,14 @@ public class RestoreScriptGenerator
     }
 
     private static void AppendDiffRestore(
-        StringBuilder sb, BackupFileInfo diff, RestoreOptions options, bool moreToFollow)
+        StringBuilder sb, BackupSet diffSet, RestoreOptions options, bool moreToFollow)
     {
         var dbName = EscapeName(options.TargetDatabaseName);
         var recoveryClause = moreToFollow ? "NORECOVERY" : GetRecoveryClause(options);
 
-        sb.AppendLine($"-- Restore DIFFERENTIAL backup: {diff.BlobName}");
+        sb.AppendLine($"-- Restore DIFFERENTIAL backup ({diffSet.FileCount} file(s)): {diffSet.SetId}");
         sb.AppendLine($"RESTORE DATABASE {dbName}");
-        sb.AppendLine($"    FROM URL = '{diff.BlobUrl}'");
-        sb.AppendLine($"    WITH CREDENTIAL = '{options.SqlCredentialName}',");
+        AppendFromUrls(sb, diffSet, options);
         sb.AppendLine($"         {recoveryClause},");
         AppendCommonOptions(sb, options);
         sb.AppendLine("GO");
@@ -130,15 +121,14 @@ public class RestoreScriptGenerator
     }
 
     private static void AppendLogRestore(
-        StringBuilder sb, BackupFileInfo log, RestoreOptions options, bool isLast, bool usePit)
+        StringBuilder sb, BackupSet logSet, RestoreOptions options, bool isLast, bool usePit)
     {
         var dbName = EscapeName(options.TargetDatabaseName);
         var recoveryClause = isLast ? GetRecoveryClause(options) : "NORECOVERY";
 
-        sb.AppendLine($"-- Restore LOG backup: {log.BlobName}");
+        sb.AppendLine($"-- Restore LOG backup ({logSet.FileCount} file(s)): {logSet.SetId}");
         sb.AppendLine($"RESTORE LOG {dbName}");
-        sb.AppendLine($"    FROM URL = '{log.BlobUrl}'");
-        sb.AppendLine($"    WITH CREDENTIAL = '{options.SqlCredentialName}',");
+        AppendFromUrls(sb, logSet, options);
 
         if (isLast && usePit && options.StopAt.HasValue)
             sb.AppendLine($"         STOPAT = '{options.StopAt.Value:yyyy-MM-ddTHH:mm:ss}',");
@@ -149,13 +139,26 @@ public class RestoreScriptGenerator
         sb.AppendLine();
     }
 
+    private static void AppendFromUrls(StringBuilder sb, BackupSet set, RestoreOptions options)
+    {
+        for (int i = 0; i < set.Files.Count; i++)
+        {
+            var file = set.Files[i];
+            var prefix = i == 0 ? "    FROM" : "        ";
+            var suffix = i < set.Files.Count - 1 ? "," : "";
+            sb.AppendLine($"{prefix} URL = '{file.BlobUrl}'{suffix}");
+        }
+
+        sb.AppendLine("    WITH");
+    }
+
     private static void AppendFileMoves(StringBuilder sb, RestoreOptions options)
     {
         foreach (var move in options.FileMoves)
         {
-            if (move.NewPhysicalName != move.PhysicalName)
+            if (!string.IsNullOrWhiteSpace(move.NewPhysicalName))
             {
-                sb.AppendLine($"         MOVE '{move.LogicalName}' TO '{move.NewPhysicalName}',");
+                sb.AppendLine($"         MOVE N'{move.LogicalName}' TO N'{move.NewPhysicalName}',");
             }
         }
     }

@@ -6,6 +6,8 @@
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:HexToBrushConverter x:Key="HexToBrush" />
+        <converters:BoolToEyeIconConverter x:Key="BoolToEyeIcon" />
     </UserControl.Resources>
 
     <Grid>
@@ -48,7 +50,10 @@
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"
                              BorderThickness="0"
-                             Foreground="{StaticResource PrimaryTextBrush}">
+                             Foreground="{StaticResource PrimaryTextBrush}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             FocusVisualStyle="{x:Null}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="4,6">
@@ -165,6 +170,11 @@
                                 <TextBlock Text="SAS TOKEN STATUS" Style="{StaticResource LabelText}" />
                                 <TextBlock Text="{Binding SasExpiryText}"
                                            Style="{StaticResource BodyText}"
+                                           Margin="0,0,0,12" />
+
+                                <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="{Binding SelectedContainer.PathPattern}"
+                                           Style="{StaticResource BodyText}"
                                            Margin="0,0,0,16" />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -275,13 +285,144 @@
                             <TextBlock Text="The shared access signature token (starting with sv= or ?sv=)"
                                        Style="{StaticResource SecondaryText}"
                                        FontSize="11" Margin="0,0,0,4" />
-                            <TextBox Text="{Binding EditSasToken, UpdateSourceTrigger=PropertyChanged}"
-                                     Style="{StaticResource DarkTextBox}"
-                                     Margin="0,0,0,16"
-                                     TextWrapping="Wrap"
-                                     AcceptsReturn="False"
-                                     MaxHeight="80"
-                                     VerticalScrollBarVisibility="Auto" />
+                            <Grid Margin="0,0,0,16">
+                                <TextBox Text="{Binding EditSasToken, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         TextWrapping="Wrap"
+                                         AcceptsReturn="False"
+                                         MaxHeight="80"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}}" />
+                                <Border Background="{StaticResource InputBackgroundBrush}"
+                                        CornerRadius="4" Padding="10,8"
+                                        BorderBrush="{StaticResource CardBorderBrush}"
+                                        BorderThickness="1"
+                                        MinHeight="36"
+                                        Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                    <TextBlock Text="••••••••••••••••••••••••••••••••••••••••••••••••"
+                                               Foreground="{StaticResource SecondaryTextBrush}"
+                                               VerticalAlignment="Center"
+                                               FontSize="14" />
+                                </Border>
+                                <Button Content="{Binding ShowSasToken, Converter={StaticResource BoolToEyeIcon}}"
+                                        Command="{Binding ToggleShowSasTokenCommand}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Margin="0,4,4,0"
+                                        Padding="6,2"
+                                        FontSize="14"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="{StaticResource SecondaryTextBrush}"
+                                        Cursor="Hand"
+                                        ToolTip="Show/hide SAS token" />
+                            </Grid>
+
+                            <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Drag the coloured elements below to define how blob paths are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
+
+                            <!-- Draggable active path elements -->
+                            <Border Background="{StaticResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="8,6" Margin="0,0,0,6"
+                                    MinHeight="40" AllowDrop="True"
+                                    DragOver="PathDragOver" Drop="PathDrop">
+                                <StackPanel>
+                                    <ListBox x:Name="ActivePathList"
+                                             ItemsSource="{Binding ActivePathElements}"
+                                             Background="Transparent" BorderThickness="0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             PreviewMouseLeftButtonDown="PathElement_PreviewMouseLeftButtonDown"
+                                             PreviewMouseMove="PathElement_PreviewMouseMove">
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="Margin" Value="0" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <ContentPresenter />
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal" Margin="0,2,4,2">
+                                                    <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
+                                                            Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                       FontSize="12" FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center" />
+                                                            <Button Content="  x" Foreground="#CCFFFFFF" FontSize="11"
+                                                                    FontWeight="Bold" Cursor="Hand"
+                                                                    Background="Transparent" BorderThickness="0"
+                                                                    VerticalAlignment="Center" Padding="0"
+                                                                    Command="{Binding DataContext.RemovePathElementCommand,
+                                                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    ToolTip="Remove this element" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <TextBlock Text="/" Foreground="{StaticResource SecondaryTextBrush}"
+                                                               FontSize="14" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Available elements to add -->
+                            <ItemsControl ItemsSource="{Binding AvailablePathElements}" Margin="0,0,0,4">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Cursor="Hand" Margin="0,0,6,4"
+                                                Command="{Binding DataContext.AddPathElementCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip="Click to add this element to the path">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="bd" CornerRadius="4" Padding="10,5"
+                                                            Opacity="0.5" BorderThickness="1"
+                                                            BorderBrush="{StaticResource CardBorderBrush}"
+                                                            Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                                       FontSize="12" Margin="0,0,4,0" />
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                       FontSize="12" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="bd" Property="Opacity" Value="0.85" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Path preview -->
+                            <TextBlock Text="{Binding EditPathPattern}" Style="{StaticResource SecondaryText}"
+                                       FontFamily="Cascadia Code, Consolas, Courier New" FontSize="11"
+                                       Margin="0,0,0,16" />
 
                             <!-- Error display -->
                             <TextBlock Text="{Binding ErrorMessage}"
@@ -301,7 +442,13 @@
                                         Margin="0,0,8,0" />
                                 <Button Content="Cancel"
                                         Style="{StaticResource SecondaryButton}"
-                                        Command="{Binding CancelEditCommand}" />
+                                        Command="{Binding CancelEditCommand}"
+                                        Margin="0,0,12,0" />
+                                <TextBlock Text="You have unsaved changes"
+                                           Foreground="{StaticResource WarningBrush}"
+                                           FontSize="12" FontStyle="Italic"
+                                           VerticalAlignment="Center"
+                                           Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Test Result in Edit Mode -->

@@ -42,6 +42,12 @@ public partial class ServerManagerViewModel : ViewModelBase
     private int _editTimeout = 15;
 
     [ObservableProperty]
+    private bool _editTrustServerCert = true;
+
+    [ObservableProperty]
+    private EncryptMode _editEncrypt = EncryptMode.Yes;
+
+    [ObservableProperty]
     private bool _isEditing;
 
     [ObservableProperty]
@@ -91,6 +97,8 @@ public partial class ServerManagerViewModel : ViewModelBase
         EditUsername = string.Empty;
         EditPassword = string.Empty;
         EditTimeout = 15;
+        EditTrustServerCert = true;
+        EditEncrypt = EncryptMode.Yes;
         IsNew = true;
         IsEditing = true;
         TestResult = string.Empty;
@@ -106,6 +114,8 @@ public partial class ServerManagerViewModel : ViewModelBase
         EditUsername = SelectedServer.Username ?? string.Empty;
         EditPassword = string.Empty;
         EditTimeout = SelectedServer.ConnectionTimeoutSeconds;
+        EditTrustServerCert = SelectedServer.TrustServerCertificate;
+        EditEncrypt = SelectedServer.Encrypt;
         IsNew = false;
         IsEditing = true;
         TestResult = string.Empty;
@@ -154,6 +164,8 @@ public partial class ServerManagerViewModel : ViewModelBase
         server.AuthMode = EditAuthMode;
         server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;
         server.ConnectionTimeoutSeconds = EditTimeout;
+        server.TrustServerCertificate = EditTrustServerCert;
+        server.Encrypt = EditEncrypt;
 
         if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
         {
@@ -234,7 +246,8 @@ public partial class ServerManagerViewModel : ViewModelBase
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
                 IsConnected = true,
-                ServerName = SelectedServer.ServerName
+                ServerName = SelectedServer.ServerName,
+                ConnectedServer = SelectedServer
             });
             SetStatus($"Connected to {SelectedServer.ServerName}");
         }
@@ -271,7 +284,9 @@ public partial class ServerManagerViewModel : ViewModelBase
                 ServerName = EditServerName,
                 AuthMode = EditAuthMode,
                 Username = EditUsername,
-                ConnectionTimeoutSeconds = EditTimeout
+                ConnectionTimeoutSeconds = EditTimeout,
+                TrustServerCertificate = EditTrustServerCert,
+                Encrypt = EditEncrypt
             };
             if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
                 _credentialStore.SaveSqlPassword(server, EditPassword);

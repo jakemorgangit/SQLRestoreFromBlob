@@ -107,6 +107,81 @@ public class DateTimeToStringConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>
+/// Converts (timelinePosition, containerWidth, row) into a Margin for positioning dots.
+/// Dots are positioned horizontally by ratio and stack vertically from the bottom.
+/// </summary>
+public class TimelinePositionConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (values.Length < 3
+            || values[0] is not double ratio
+            || values[1] is not double width
+            || values[2] is not int row
+            || width <= 0)
+            return new Thickness(0);
+
+        double dotSize = 14;
+        double left = ratio * Math.Max(0, width - dotSize);
+        double bottom = row * (dotSize + 4);
+        return new Thickness(Math.Max(0, left), 0, 0, bottom);
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Converts (position, containerWidth) into a left Margin for tick marks.
+/// </summary>
+public class TickPositionConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (values.Length < 2
+            || values[0] is not double ratio
+            || values[1] is not double width
+            || width <= 0)
+            return new Thickness(0);
+
+        double left = ratio * width;
+        return new Thickness(Math.Max(0, left), 0, 0, 0);
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+public class HexToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is string hex)
+        {
+            try
+            {
+                var color = (Color)ColorConverter.ConvertFromString(hex);
+                return new SolidColorBrush(color);
+            }
+            catch { }
+        }
+        return new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xD9));
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+public class BoolToEyeIconConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is bool b && b ? "Hide" : "Show";
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 public class EnumToBoolConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

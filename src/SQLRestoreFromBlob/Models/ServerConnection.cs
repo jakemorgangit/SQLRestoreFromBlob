@@ -6,6 +6,13 @@ public enum AuthMode
     SqlAuth
 }
 
+public enum EncryptMode
+{
+    Yes,
+    No,
+    Strict
+}
+
 public class ServerConnection
 {
     public string Name { get; set; } = string.Empty;
@@ -13,6 +20,8 @@ public class ServerConnection
     public AuthMode AuthMode { get; set; } = AuthMode.WindowsAuth;
     public string? Username { get; set; }
     public int ConnectionTimeoutSeconds { get; set; } = 15;
+    public bool TrustServerCertificate { get; set; } = true;
+    public EncryptMode Encrypt { get; set; } = EncryptMode.Yes;
 
     /// <summary>
     /// Key used to look up password in Windows Credential Manager.

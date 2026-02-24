@@ -27,10 +27,25 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _editSasToken = string.Empty;
 
     [ObservableProperty]
+    private string _editPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+
+    [ObservableProperty]
+    private ObservableCollection<PathElement> _activePathElements = [];
+
+    [ObservableProperty]
+    private ObservableCollection<PathElement> _availablePathElements = [];
+
+    [ObservableProperty]
     private bool _isEditing;
 
     [ObservableProperty]
     private bool _isNew;
+
+    [ObservableProperty]
+    private bool _hasUnsavedChanges;
+
+    [ObservableProperty]
+    private bool _showSasToken;
 
     [ObservableProperty]
     private string _testResult = string.Empty;
@@ -46,6 +61,11 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     [ObservableProperty]
     private ContainerSummary? _containerSummary;
+
+    private string _originalName = "";
+    private string _originalUrl = "";
+    private string _originalSas = "";
+    private string _originalPattern = "";
 
     public BlobConfigViewModel(CredentialStore credentialStore, BlobStorageService blobService)
     {
@@ -79,6 +99,30 @@ public partial class BlobConfigViewModel : ViewModelBase
         UpdateSasExpiryStatus(value);
     }
 
+    partial void OnEditNameChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditContainerUrlChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditSasTokenChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditPathPatternChanged(string value) => CheckForUnsavedChanges();
+
+    private void CheckForUnsavedChanges()
+    {
+        if (!IsEditing) return;
+        HasUnsavedChanges =
+            EditName != _originalName ||
+            EditContainerUrl != _originalUrl ||
+            EditSasToken != _originalSas ||
+            EditPathPattern != _originalPattern;
+    }
+
+    private void StoreOriginalValues()
+    {
+        _originalName = EditName;
+        _originalUrl = EditContainerUrl;
+        _originalSas = EditSasToken;
+        _originalPattern = EditPathPattern;
+        HasUnsavedChanges = false;
+    }
+
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
         var expiry = _credentialStore.GetSasTokenExpiry(container);
@@ -97,16 +141,83 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
     }
 
+    private void SyncPathElementsFromPattern()
+    {
+        var active = PathElement.ParsePattern(EditPathPattern);
+        ActivePathElements = new ObservableCollection<PathElement>(active);
+        RefreshAvailableElements();
+    }
+
+    private void SyncPatternFromElements()
+    {
+        EditPathPattern = PathElement.BuildPattern(ActivePathElements);
+    }
+
+    private void RefreshAvailableElements()
+    {
+        var activeTokens = ActivePathElements.Select(e => e.Token).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var available = PathElement.AllElements.Where(e => !activeTokens.Contains(e.Token)).ToList();
+        AvailablePathElements = new ObservableCollection<PathElement>(available);
+    }
+
+    [RelayCommand]
+    private void AddPathElement(PathElement? element)
+    {
+        if (element == null) return;
+        var insertIdx = ActivePathElements.Count;
+        var fileNameIdx = -1;
+        for (int i = 0; i < ActivePathElements.Count; i++)
+        {
+            if (ActivePathElements[i].Token.Equals("FileName", StringComparison.OrdinalIgnoreCase))
+            {
+                fileNameIdx = i;
+                break;
+            }
+        }
+        if (fileNameIdx >= 0) insertIdx = fileNameIdx;
+        ActivePathElements.Insert(insertIdx, element);
+        RefreshAvailableElements();
+        SyncPatternFromElements();
+    }
+
+    [RelayCommand]
+    private void RemovePathElement(PathElement? element)
+    {
+        if (element == null || element.Token.Equals("FileName", StringComparison.OrdinalIgnoreCase)) return;
+        ActivePathElements.Remove(element);
+        RefreshAvailableElements();
+        SyncPatternFromElements();
+    }
+
+    public void MovePathElement(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= ActivePathElements.Count) return;
+        if (toIndex < 0 || toIndex >= ActivePathElements.Count) return;
+        if (fromIndex == toIndex) return;
+        ActivePathElements.Move(fromIndex, toIndex);
+        SyncPatternFromElements();
+    }
+
+    [RelayCommand]
+    private void ToggleShowSasToken()
+    {
+        ShowSasToken = !ShowSasToken;
+    }
+
     [RelayCommand]
     private void AddNew()
     {
         EditName = string.Empty;
         EditContainerUrl = string.Empty;
         EditSasToken = string.Empty;
+        EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+        SyncPathElementsFromPattern();
+        ShowSasToken = true;
         IsNew = true;
         IsEditing = true;
         TestResult = string.Empty;
         ContainerSummary = null;
+        StoreOriginalValues();
     }
 
     [RelayCommand]
@@ -116,16 +227,21 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
         EditSasToken = _credentialStore.GetSasToken(SelectedContainer) ?? string.Empty;
+        EditPathPattern = SelectedContainer.PathPattern;
+        SyncPathElementsFromPattern();
+        ShowSasToken = false;
         IsNew = false;
         IsEditing = true;
         TestResult = string.Empty;
         ContainerSummary = null;
+        StoreOriginalValues();
     }
 
     [RelayCommand]
     private void CancelEdit()
     {
         IsEditing = false;
+        HasUnsavedChanges = false;
         ClearStatus();
     }
 
@@ -155,7 +271,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             container = new BlobContainerConfig
             {
                 Name = EditName,
-                ContainerUrl = EditContainerUrl.TrimEnd('/')
+                ContainerUrl = EditContainerUrl.TrimEnd('/'),
+                PathPattern = EditPathPattern
             };
             Containers.Add(container);
         }
@@ -164,6 +281,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             container = SelectedContainer!;
             container.Name = EditName;
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
+            container.PathPattern = EditPathPattern;
         }
 
         _credentialStore.SaveSasToken(container, EditSasToken);
@@ -171,6 +289,7 @@ public partial class BlobConfigViewModel : ViewModelBase
 
         SelectedContainer = container;
         IsEditing = false;
+        HasUnsavedChanges = false;
         UpdateSasExpiryStatus(container);
         SetStatus("Container saved successfully.");
     }
@@ -193,8 +312,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
         EditSasToken = string.Empty;
+        EditPathPattern = SelectedContainer.PathPattern;
+        SyncPathElementsFromPattern();
         IsNew = false;
         IsEditing = true;
+        StoreOriginalValues();
         SetStatus("Please enter the new SAS token.");
     }
 
@@ -217,7 +339,8 @@ public partial class BlobConfigViewModel : ViewModelBase
         try
         {
             await _blobService.VerifyConnectionAsync(config);
-            var summary = await _blobService.GetContainerSummaryAsync(config);
+            var files = await _blobService.ListBackupFilesAsync(config);
+            var summary = _blobService.GetContainerSummary(files);
             ContainerSummary = summary;
             TestSuccess = true;
             TestResult = $"Connected! {summary.TotalFiles} files found ({summary.TotalSizeDisplay})";
