@@ -1,6 +1,6 @@
 # SQL Restore From Blob
 
-A sleek, modern Windows desktop application for restoring SQL Server databases from Azure Blob Storage backups. Built with WPF on .NET 8, featuring a dark-mode UI, intelligent backup chain detection, point-in-time recovery, and secure credential management.
+A modern desktop application for restoring SQL Server databases from Azure Blob Storage backups. Built with WPF on .NET 8, featuring a dark-mode UI, intelligent backup chain detection, point-in-time recovery, and secure credential management.
 
 ![Screenshot - Main Interface](docs/screenshots/main-interface.png)
 
@@ -22,7 +22,7 @@ A sleek, modern Windows desktop application for restoring SQL Server databases f
 ### Backup Discovery & Browsing
 - Browse all backups in a container with filtering by server, database, and type
 - Automatic inference of database names from folder structures
-- Configurable path pattern builder with drag-and-drop components
+- Configurable blob path pattern builder with drag-and-drop components
 - Summary statistics showing backup set counts (not just file counts)
 
 ### Point-in-Time Recovery
@@ -45,8 +45,8 @@ A sleek, modern Windows desktop application for restoring SQL Server databases f
 ### Direct Execution
 - Execute restore scripts directly against connected SQL Server instances
 - Real-time progress logging with auto-scroll
-- Safe "arm-to-execute" confirmation (no modal dialogs)
-- Full restore chain execution with progress feedback
+- Safe "arm-to-execute" confirmation 
+- Full restore chain execution with progress feedback in execution console
 
 ## Screenshots
 
@@ -300,8 +300,6 @@ SQLRestoreFromBlob/
 - This is expected if you selected **NORECOVERY** mode
 - Run `RESTORE DATABASE [YourDB] WITH RECOVERY` to bring it online
 
-### "Incorrect syntax near '@secret'"
-- Fixed in v1.0 - update to the latest release
 
 ## Contributing
 
@@ -320,5 +318,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgements
 
-- UI design inspired by [Erik Darling's SQL Performance tools](https://www.erikdarling.com/)
+- UI design inspired by [Erik Darling's SQL Performance tools](https://github.com/erikdarlingdata/PerformanceMonitor)
 - Built with [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)
