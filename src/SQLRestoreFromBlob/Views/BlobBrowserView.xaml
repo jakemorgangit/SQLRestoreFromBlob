@@ -1,0 +1,217 @@
+<UserControl x:Class="SQLRestoreFromBlob.Views.BlobBrowserView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:SQLRestoreFromBlob.Converters">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:FileSizeConverter x:Key="FileSize" />
+        <converters:BackupTypeToColorConverter x:Key="TypeToColor" />
+        <converters:DateTimeToStringConverter x:Key="DateToStr" />
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Browse Backups"
+                       Style="{StaticResource HeaderText}" />
+            <TextBlock Text="View and explore backup files stored in your Azure Blob container."
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,4,0,0" />
+        </StackPanel>
+
+        <!-- Container Selector + Load -->
+        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="SELECT CONTAINER" Style="{StaticResource LabelText}" />
+                    <ComboBox ItemsSource="{Binding Containers}"
+                              SelectedItem="{Binding SelectedContainer}"
+                              DisplayMemberPath="Name"
+                              Style="{StaticResource DarkComboBox}"
+                              Margin="0,0,12,0" />
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        Content="Load Backups"
+                        Style="{StaticResource PrimaryButton}"
+                        Command="{Binding LoadBackupsCommand}"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,8,0" />
+
+                <Button Grid.Column="2"
+                        Content="&#x21BB; Refresh"
+                        Style="{StaticResource SecondaryButton}"
+                        Command="{Binding RefreshCommand}"
+                        VerticalAlignment="Bottom"
+                        ToolTip="Refresh container list from saved configs" />
+            </Grid>
+        </Border>
+
+        <!-- Summary + Filters -->
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <!-- Summary Stats -->
+                <Grid Margin="0,0,0,16"
+                      Visibility="{Binding Summary, Converter={StaticResource NullToVis}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Summary.TotalFiles}"
+                                   FontSize="22" FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Total" Style="{StaticResource SecondaryText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Summary.FullBackups}"
+                                   FontSize="22" FontWeight="Bold"
+                                   Foreground="{StaticResource AccentBrush}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Full" Style="{StaticResource SecondaryText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Summary.DiffBackups}"
+                                   FontSize="22" FontWeight="Bold"
+                                   Foreground="{StaticResource WarningBrush}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Diff" Style="{StaticResource SecondaryText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Summary.LogBackups}"
+                                   FontSize="22" FontWeight="Bold"
+                                   Foreground="{StaticResource SuccessBrush}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Log" Style="{StaticResource SecondaryText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Summary.TotalSizeDisplay}"
+                                   FontSize="16" FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Size" Style="{StaticResource SecondaryText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Filters -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox Grid.Column="0"
+                             Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource DarkTextBox}"
+                             Margin="0,0,12,0">
+                        <TextBox.ToolTip>Filter by file name</TextBox.ToolTip>
+                    </TextBox>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <CheckBox Content="Full" IsChecked="{Binding ShowFull}"
+                                  Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
+                        <CheckBox Content="Diff" IsChecked="{Binding ShowDiff}"
+                                  Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
+                        <CheckBox Content="Log" IsChecked="{Binding ShowLog}"
+                                  Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
+                        <CheckBox Content="Other" IsChecked="{Binding ShowUnknown}"
+                                  Style="{StaticResource DarkCheckBox}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Backup Files Grid -->
+        <Border Grid.Row="3" Style="{StaticResource CardBorder}">
+            <Grid>
+                <!-- Empty State -->
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                            Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                    <TextBlock Text="&#x1F4C2;" FontSize="48" HorizontalAlignment="Center"
+                               Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,12" />
+                    <TextBlock Text="No backup files loaded"
+                               Style="{StaticResource BodyText}"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Select a container and click 'Load Backups' to browse files."
+                               Style="{StaticResource SecondaryText}"
+                               HorizontalAlignment="Center"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+
+                <!-- DataGrid -->
+                <DataGrid ItemsSource="{Binding FilteredFiles}"
+                          SelectedItem="{Binding SelectedFile}"
+                          Style="{StaticResource DarkDataGrid}"
+                          Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="Type" Width="110" SortMemberPath="Type">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
+                                            CornerRadius="3"
+                                            Padding="8,3"
+                                            HorizontalAlignment="Left"
+                                            Opacity="0.85">
+                                        <TextBlock Text="{Binding TypeDisplay}"
+                                                   Foreground="White"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold" />
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTextColumn Header="File Name" Binding="{Binding BlobName}" Width="*" />
+                        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="100" />
+                        <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified, Converter={StaticResource DateToStr}}" Width="160" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Loading -->
+                <Border Background="#80000000"
+                        CornerRadius="6"
+                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="Loading backup files..."
+                                   Style="{StaticResource BodyText}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Status -->
+        <TextBlock Grid.Row="3"
+                   Text="{Binding StatusMessage}"
+                   Style="{StaticResource SecondaryText}"
+                   VerticalAlignment="Bottom"
+                   Margin="0,0,0,-20"
+                   Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
+    </Grid>
+</UserControl>
