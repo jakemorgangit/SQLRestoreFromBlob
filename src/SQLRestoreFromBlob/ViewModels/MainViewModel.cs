@@ -61,6 +61,7 @@ public partial class MainViewModel : ViewModelBase
         Restore.ConnectedServerName = e.ServerName;
         Restore.ConnectedServer = e.ConnectedServer;
         GlobalStatus = e.IsConnected ? $"Connected to {e.ServerName}" : "Ready";
+        _ = Restore.RefreshCredentialStatusAsync();
     }
 
     [RelayCommand]

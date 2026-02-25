@@ -178,6 +178,32 @@ public class SqlServerService
         }
     }
 
+    /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
+    public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
+        ServerConnection server, string credentialName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(credentialName))
+            return (false, false);
+
+        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT credential_identity
+            FROM sys.credentials
+            WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", credentialName);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return (false, false);
+
+        var identity = reader["credential_identity"]?.ToString() ?? "";
+        var isSas = identity.Equals("SHARED ACCESS SIGNATURE", StringComparison.OrdinalIgnoreCase);
+        return (true, isSas);
+    }
+
     public async Task EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         CancellationToken ct = default)

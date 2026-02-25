@@ -543,8 +543,76 @@
                             <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}" />
                             <TextBox Text="{Binding SqlCredentialName, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
-                                     Margin="0,0,0,16"
-                                     ToolTip="Defaults to the container URL. Used as the SQL Server credential name." />
+                                     Margin="0,0,0,8"
+                                     ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
+
+                            <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
+                            <Border Background="{StaticResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
+                                    Visibility="{Binding CredentialSectionVisible, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <!-- Not connected: verify credential by connecting -->
+                                    <StackPanel Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                                            <Run Text="Verify credential by connecting to a SQL Server instance (SQL Servers tab). " />
+                                            <Run Text="Creating the credential is optional: once connected, this section will show whether the credential exists; you can then create it from here if needed, or ensure it already exists on the server before running the restore script." />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <!-- Connected: show status and optional Create -->
+                                    <StackPanel Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}}">
+                                        <Border Padding="0,0,0,8">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}" />
+                                                    <Setter Property="BorderThickness" Value="0" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CredentialIsValidSas}" Value="True">
+                                                            <Setter Property="Background" Value="#1A27AE60" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding CredentialExistsOnServer}" Value="False">
+                                                            <Setter Property="Background" Value="#30E74C3C" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource ErrorBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </DataTrigger>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding CredentialExistsOnServer}" Value="True" />
+                                                                <Condition Binding="{Binding CredentialIsValidSas}" Value="False" />
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Background" Value="#30E67E22" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding CredentialStatusMessage}"
+                                                       Style="{StaticResource SecondaryText}"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                        <TextBlock Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                                   Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                            <Run Text="Restore from URL requires a SQL credential (SHARED ACCESS SIGNATURE) for the container. Creating it is optional: you can create it from here or ensure it exists on the server before running the script. The SAS token is never included in the generated script." />
+                                        </TextBlock>
+                                        <Button Content="Create credential on server"
+                                                Command="{Binding CreateCredentialOnServerCommand}"
+                                                Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                                Margin="0,0,0,0" Padding="10,6"
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="Creates or updates a SQL Server credential for this blob container URL so that RESTORE FROM URL can access the backups. Optional; the credential can also be created manually on the server. The SAS token is not included in the generated script."
+                                                HorizontalAlignment="Left" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </Grid>
                 </StackPanel>

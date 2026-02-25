@@ -282,39 +282,43 @@
                                      Margin="0,0,0,16" />
 
                             <TextBlock Text="SAS TOKEN" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Token is stored securely and cannot be displayed. Enter a new token below to replace it."
+                                       Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                       Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}}" />
                             <TextBlock Text="The shared access signature token (starting with sv= or ?sv=)"
-                                       Style="{StaticResource SecondaryText}"
-                                       FontSize="11" Margin="0,0,0,4" />
+                                       Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4"
+                                       Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
                             <Grid Margin="0,0,0,16">
+                                <!-- When stored token exists: single replacement box (always masked for what they type) -->
                                 <TextBox Text="{Binding EditSasToken, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource DarkTextBox}"
-                                         TextWrapping="Wrap"
-                                         AcceptsReturn="False"
-                                         MaxHeight="80"
+                                         TextWrapping="Wrap" AcceptsReturn="False" MaxHeight="80"
                                          VerticalScrollBarVisibility="Auto"
-                                         Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}}" />
-                                <Border Background="{StaticResource InputBackgroundBrush}"
-                                        CornerRadius="4" Padding="10,8"
-                                        BorderBrush="{StaticResource CardBorderBrush}"
-                                        BorderThickness="1"
-                                        MinHeight="36"
-                                        Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
-                                    <TextBlock Text="••••••••••••••••••••••••••••••••••••••••••••••••"
-                                               Foreground="{StaticResource SecondaryTextBrush}"
-                                               VerticalAlignment="Center"
-                                               FontSize="14" />
-                                </Border>
-                                <Button Content="{Binding ShowSasToken, Converter={StaticResource BoolToEyeIcon}}"
-                                        Command="{Binding ToggleShowSasTokenCommand}"
-                                        HorizontalAlignment="Right" VerticalAlignment="Top"
-                                        Margin="0,4,4,0"
-                                        Padding="6,2"
-                                        FontSize="14"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Foreground="{StaticResource SecondaryTextBrush}"
-                                        Cursor="Hand"
-                                        ToolTip="Show/hide SAS token" />
+                                         Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}}" />
+                                <!-- When new token: show/hide toggle -->
+                                <Grid Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                    <TextBox Text="{Binding EditSasToken, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource DarkTextBox}"
+                                             TextWrapping="Wrap" AcceptsReturn="False" MaxHeight="80"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}}" />
+                                    <Border Background="{StaticResource InputBackgroundBrush}"
+                                            CornerRadius="4" Padding="10,8"
+                                            BorderBrush="{StaticResource CardBorderBrush}"
+                                            BorderThickness="1" MinHeight="36"
+                                            Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                        <TextBlock Text="••••••••••••••••••••••••••••••••••••••••••••••••"
+                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center" FontSize="14" />
+                                    </Border>
+                                    <Button Content="{Binding ShowSasToken, Converter={StaticResource BoolToEyeIcon}}"
+                                            Command="{Binding ToggleShowSasTokenCommand}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            Margin="0,4,4,0" Padding="6,2" FontSize="14"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="{StaticResource SecondaryTextBrush}"
+                                            Cursor="Hand" ToolTip="Show/hide SAS token" />
+                                </Grid>
                             </Grid>
 
                             <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />

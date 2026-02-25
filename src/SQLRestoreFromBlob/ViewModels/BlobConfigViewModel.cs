@@ -44,6 +44,11 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasUnsavedChanges;
 
+    /// <summary>When true, a SAS token is stored for this container; it is never shown, only replaced.</summary>
+    [ObservableProperty]
+    private bool _hasStoredSasToken;
+
+    /// <summary>When true (and no stored token), the SAS token text is visible in the edit box.</summary>
     [ObservableProperty]
     private bool _showSasToken;
 
@@ -62,6 +67,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private ContainerSummary? _containerSummary;
 
+    private const string StoredSasSentinel = "***STORED***";
     private string _originalName = "";
     private string _originalUrl = "";
     private string _originalSas = "";
@@ -107,10 +113,13 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void CheckForUnsavedChanges()
     {
         if (!IsEditing) return;
+        var sasChanged = _originalSas == StoredSasSentinel
+            ? !string.IsNullOrEmpty(EditSasToken)
+            : EditSasToken != _originalSas;
         HasUnsavedChanges =
             EditName != _originalName ||
             EditContainerUrl != _originalUrl ||
-            EditSasToken != _originalSas ||
+            sasChanged ||
             EditPathPattern != _originalPattern;
     }
 
@@ -118,7 +127,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     {
         _originalName = EditName;
         _originalUrl = EditContainerUrl;
-        _originalSas = EditSasToken;
+        _originalSas = HasStoredSasToken ? StoredSasSentinel : EditSasToken;
         _originalPattern = EditPathPattern;
         HasUnsavedChanges = false;
     }
@@ -212,6 +221,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditSasToken = string.Empty;
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
         SyncPathElementsFromPattern();
+        HasStoredSasToken = false;
         ShowSasToken = true;
         IsNew = true;
         IsEditing = true;
@@ -226,10 +236,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (SelectedContainer == null) return;
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
-        EditSasToken = _credentialStore.GetSasToken(SelectedContainer) ?? string.Empty;
+        var storedToken = _credentialStore.GetSasToken(SelectedContainer);
+        HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
+        EditSasToken = string.Empty; // Never show stored token; user can only replace it
         EditPathPattern = SelectedContainer.PathPattern;
         SyncPathElementsFromPattern();
-        ShowSasToken = false;
         IsNew = false;
         IsEditing = true;
         TestResult = string.Empty;
@@ -254,7 +265,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(EditSasToken))
+        bool haveTokenToSave = !string.IsNullOrWhiteSpace(EditSasToken);
+        if (IsNew && !haveTokenToSave)
         {
             SetError("SAS Token is required.");
             return;
@@ -284,7 +296,9 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.PathPattern = EditPathPattern;
         }
 
-        _credentialStore.SaveSasToken(container, EditSasToken);
+        if (haveTokenToSave)
+            _credentialStore.SaveSasToken(container, EditSasToken);
+        // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
         SaveContainers();
 
         SelectedContainer = container;
@@ -311,28 +325,35 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (SelectedContainer == null) return;
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
         SyncPathElementsFromPattern();
         IsNew = false;
         IsEditing = true;
         StoreOriginalValues();
-        SetStatus("Please enter the new SAS token.");
+        SetStatus("Enter the new SAS token below to replace the existing one.");
     }
 
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
-        var config = IsEditing
-            ? new BlobContainerConfig { Name = EditName, ContainerUrl = EditContainerUrl }
-            : SelectedContainer;
+        BlobContainerConfig? config;
+        if (IsEditing)
+        {
+            if (HasStoredSasToken && string.IsNullOrWhiteSpace(EditSasToken))
+                config = SelectedContainer; // Use stored token for test
+            else
+            {
+                config = new BlobContainerConfig { Name = EditName, ContainerUrl = EditContainerUrl };
+                if (!string.IsNullOrWhiteSpace(EditSasToken))
+                    _credentialStore.SaveSasToken(config, EditSasToken);
+            }
+        }
+        else
+            config = SelectedContainer;
 
         if (config == null) return;
-
-        if (IsEditing && !string.IsNullOrWhiteSpace(EditSasToken))
-        {
-            _credentialStore.SaveSasToken(config, EditSasToken);
-        }
 
         IsBusy = true;
         TestResult = string.Empty;

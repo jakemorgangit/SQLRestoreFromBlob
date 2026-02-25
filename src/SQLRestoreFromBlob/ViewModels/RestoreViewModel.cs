@@ -150,10 +150,65 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _sqlCredentialName = string.Empty;
 
+    // Blob credential status on connected server (credential must exist for RESTORE FROM URL)
+    [ObservableProperty]
+    private bool? _credentialExistsOnServer; // null = not checked
+
+    [ObservableProperty]
+    private bool _credentialIsValidSas; // true when exists and identity is SHARED ACCESS SIGNATURE
+
+    [ObservableProperty]
+    private string _credentialStatusMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _isCheckingCredential;
+
+    [ObservableProperty]
+    private bool _credentialSectionVisible;
+
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
     {
         if (value != null)
             SqlCredentialName = value.ContainerUrl;
+        CredentialSectionVisible = value != null;
+        _ = RefreshCredentialStatusAsync();
+    }
+
+    /// <summary>Call when ConnectedServer or SelectedContainer changes so credential status is updated.</summary>
+    public async Task RefreshCredentialStatusAsync()
+    {
+        CredentialSectionVisible = SelectedContainer != null;
+        if (ConnectedServer == null || SelectedContainer == null)
+        {
+            CredentialExistsOnServer = null;
+            CredentialStatusMessage = string.Empty;
+            CredentialIsValidSas = false;
+            return;
+        }
+
+        IsCheckingCredential = true;
+        CredentialStatusMessage = "Checking...";
+        var server = ConnectedServer!;
+        try
+        {
+            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+            CredentialExistsOnServer = exists;
+            CredentialIsValidSas = exists && isSas;
+            CredentialStatusMessage = exists
+                ? (isSas ? "Credential is present and valid (SHARED ACCESS SIGNATURE)." : "Credential exists but is not a SAS credential; restore may fail.")
+                : "Credential is not present on this server. Restore will fail unless you create it.";
+        }
+        catch (Exception ex)
+        {
+            CredentialExistsOnServer = null;
+            CredentialIsValidSas = false;
+            CredentialStatusMessage = $"Could not check credential: {ex.Message}";
+        }
+        finally
+        {
+            IsCheckingCredential = false;
+            CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
+        }
     }
 
     [ObservableProperty]
@@ -700,6 +755,36 @@ public partial class RestoreViewModel : ViewModelBase
         HasScript = true;
         SetStatus("Script generated successfully.");
     }
+
+    /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
+    [RelayCommand(CanExecute = nameof(CanCreateCredential))]
+    private async Task CreateCredentialOnServerAsync()
+    {
+        if (ConnectedServer == null || SelectedContainer == null) return;
+
+        var sasToken = _credentialStore.GetSasToken(SelectedContainer);
+        if (string.IsNullOrEmpty(sasToken))
+        {
+            SetError("No SAS token stored for this container. Add or refresh the token in Blob Storage config.");
+            return;
+        }
+
+        try
+        {
+            await _sqlService.EnsureCredentialExistsAsync(
+                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+            await RefreshCredentialStatusAsync();
+            SetStatus("Credential created or updated on server.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to create credential: {ex.Message}");
+        }
+    }
+
+    private bool CanCreateCredential() =>
+        IsConnectedToServer && SelectedContainer != null &&
+        (CredentialExistsOnServer != true || !CredentialIsValidSas);
 
     [RelayCommand]
     private void CopyScript()

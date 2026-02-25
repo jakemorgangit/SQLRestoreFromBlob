@@ -14,7 +14,7 @@ public class RestoreScriptGenerator
         var usePit = options.StopAt.HasValue && hasLogs;
 
         AppendHeader(sb, options, chain);
-        AppendCredentialBlock(sb, options);
+        // Credential is not included in script; it must exist on the server (see Restore options).
 
         if (options.DisconnectSessions)
             AppendDisconnectSessions(sb, dbName);
@@ -51,25 +51,6 @@ public class RestoreScriptGenerator
         if (options.StopAt.HasValue)
             sb.AppendLine($"-- Point-in-Time: {options.StopAt.Value:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine("-- ============================================================");
-        sb.AppendLine();
-    }
-
-    private static void AppendCredentialBlock(StringBuilder sb, RestoreOptions options)
-    {
-        if (string.IsNullOrEmpty(options.SasToken) || string.IsNullOrEmpty(options.StorageAccountUrl))
-            return;
-
-        var credName = EscapeName(options.SqlCredentialName);
-        var cleanSas = options.SasToken.TrimStart('?');
-
-        sb.AppendLine("-- Create/recreate the credential for blob access");
-        sb.AppendLine($"IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = '{options.SqlCredentialName.Replace("'", "''")}')");
-        sb.AppendLine($"    DROP CREDENTIAL {credName};");
-        sb.AppendLine();
-        sb.AppendLine($"CREATE CREDENTIAL {credName}");
-        sb.AppendLine("    WITH IDENTITY = 'SHARED ACCESS SIGNATURE',");
-        sb.AppendLine($"    SECRET = '{cleanSas}';");
-        sb.AppendLine("GO");
         sb.AppendLine();
     }
 
