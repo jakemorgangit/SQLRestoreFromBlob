@@ -33,7 +33,8 @@ A sleek, modern Windows desktop application for restoring SQL Server databases f
 
 ### Restore Script Generation
 - Complete T-SQL restore scripts with proper `FROM URL` syntax
-- Automatic SQL Server credential creation for SAS token access
+- **No SAS token or credential in scripts** – the generated script never contains credentials; the SQL Server must already have a credential for the blob container URL (or you create it from the app)
+- Restore options show whether the blob credential exists on the connected server; optional "Create credential on server" so you can create/update it without putting the token in any script
 - Support for all common restore options:
   - `WITH REPLACE` - Overwrite existing database
   - `WITH MOVE` - Relocate data/log files (auto-detects server default paths)
@@ -181,9 +182,7 @@ Your SAS token needs the following minimum permissions:
 - **List (l)** - To enumerate blobs in the container
 - **Read (r)** - To read backup files
 
-For the application to create the SQL Server credential and execute restores:
-- The SAS token is passed to SQL Server via `CREATE CREDENTIAL`
-- SQL Server connects directly to Azure Blob Storage
+For restore execution, the SQL Server instance must have a credential for the blob container URL (identity `SHARED ACCESS SIGNATURE`). You can create or update this credential from the app using "Create credential on server" in the Restore options; the SAS token is never included in generated scripts.
 
 Example SAS token permissions: `sp=rl` (read + list)
 
@@ -248,9 +247,10 @@ When you select a transaction log restore point, the chain includes:
 - **SQL Passwords** - Stored securely in Windows Credential Manager
 - **Configuration** - Non-sensitive settings stored in `%LOCALAPPDATA%\SQLRestoreFromBlob\config.json`
 
-### SAS Token Display
+### SAS Token Handling
 
-SAS tokens are masked by default in the UI. Click "Show" to reveal temporarily.
+- **After save, the token is never shown again** – once a SAS token is saved for a container, it cannot be viewed in the UI; you can only replace it by entering a new token. This reduces the risk of exposure.
+- For new containers (before save), you can type the token and optionally show/hide it while editing.
 
 ## Architecture
 
