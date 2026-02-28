@@ -797,6 +797,39 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void CopyPathHttps(BackupFileInfo? file)
+    {
+        if (file == null || SelectedContainer == null) return;
+        try
+        {
+            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, file.BlobName);
+            Clipboard.SetText(url);
+            SetStatus("HTTPS path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyPathContainer(BackupFileInfo? file)
+    {
+        if (file == null || SelectedContainer == null) return;
+        try
+        {
+            var containerName = SelectedContainer.ContainerName ?? "container";
+            var path = $"{containerName}/{file.BlobName}";
+            Clipboard.SetText(path);
+            SetStatus("Container path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
     private void SaveScript()
     {
         if (string.IsNullOrEmpty(GeneratedScript)) return;

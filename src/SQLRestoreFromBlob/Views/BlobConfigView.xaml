@@ -8,6 +8,7 @@
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
         <converters:HexToBrushConverter x:Key="HexToBrush" />
         <converters:BoolToEyeIconConverter x:Key="BoolToEyeIcon" />
+        <converters:BackupSourceTypeToDisplayConverter x:Key="BackupSourceTypeDisplay" />
     </UserControl.Resources>
 
     <Grid>
@@ -172,10 +173,23 @@
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
 
+                                <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
+                                <TextBlock Margin="0,0,0,12">
+                                    <TextBlock.Text>
+                                        <Binding Path="SelectedContainer.BackupSourceType" Converter="{StaticResource BackupSourceTypeDisplay}" />
+                                    </TextBlock.Text>
+                                </TextBlock>
+
                                 <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
                                 <TextBlock Text="{Binding SelectedContainer.PathPattern}"
                                            Style="{StaticResource BodyText}"
-                                           Margin="0,0,0,16" />
+                                           Margin="0,0,0,12" />
+                                <StackPanel Visibility="{Binding SelectedContainer.AgPathPattern, Converter={StaticResource NullToVis}}"
+                                            Margin="0,0,0,16">
+                                    <TextBlock Text="AG PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                                    <TextBlock Text="{Binding SelectedContainer.AgPathPattern}"
+                                               Style="{StaticResource BodyText}" />
+                                </StackPanel>
 
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                     <Button Content="Edit"
@@ -321,7 +335,33 @@
                                 </Grid>
                             </Grid>
 
-                            <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Choose whether this container holds standalone instance backups, Availability Group backups (Ola default naming), or both."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                            <ComboBox ItemsSource="{Binding BackupSourceTypeOptions}"
+                                      SelectedItem="{Binding EditBackupSourceType}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,0,0,16">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={StaticResource BackupSourceTypeDisplay}}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource LabelText}">
+                                        <Setter Property="Text" Value="BLOB PATH STRUCTURE" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMixedSourceType}" Value="True">
+                                                <Setter Property="Text" Value="STANDALONE PATH STRUCTURE" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                             <TextBlock Text="Drag the coloured elements below to define how blob paths are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
                                        Style="{StaticResource SecondaryText}"
                                        FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
@@ -426,7 +466,115 @@
                             <!-- Path preview -->
                             <TextBlock Text="{Binding EditPathPattern}" Style="{StaticResource SecondaryText}"
                                        FontFamily="Cascadia Code, Consolas, Courier New" FontSize="11"
-                                       Margin="0,0,0,16" />
+                                       Margin="0,0,0,8" />
+
+                            <!-- AG path structure (when AG or Mixed) - drag/drop same as standalone -->
+                            <Border Visibility="{Binding IsAgPathSectionVisible, Converter={StaticResource BoolToVis}}"
+                                    Background="{StaticResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <TextBlock Text="AG PATH STRUCTURE" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <TextBlock Text="Drag the coloured elements to define how AG backup paths are structured (e.g. BackupType/ClusterName$AGName/DatabaseName/FileName). Leave default to also support Ola flat filenames."
+                                               Style="{StaticResource SecondaryText}"
+                                               FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
+                                    <Border Background="{StaticResource CardBorderBrush}"
+                                            CornerRadius="4" Padding="8,6" Margin="0,0,0,6"
+                                            MinHeight="40" AllowDrop="True"
+                                            BorderThickness="1"
+                                            DragOver="AgPathDragOver" Drop="AgPathDrop">
+                                        <StackPanel>
+                                            <ListBox x:Name="AgActivePathList"
+                                                     ItemsSource="{Binding AgActivePathElements}"
+                                                     Background="Transparent" BorderThickness="0"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     PreviewMouseLeftButtonDown="AgPathElement_PreviewMouseLeftButtonDown"
+                                                     PreviewMouseMove="AgPathElement_PreviewMouseMove">
+                                                <ListBox.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel Orientation="Horizontal" />
+                                                    </ItemsPanelTemplate>
+                                                </ListBox.ItemsPanel>
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="Padding" Value="0" />
+                                                        <Setter Property="Margin" Value="0" />
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="ListBoxItem">
+                                                                    <ContentPresenter />
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,2,4,2">
+                                                            <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
+                                                                    Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                               FontSize="12" FontWeight="SemiBold"
+                                                                               VerticalAlignment="Center" />
+                                                                    <Button Content="  x" Foreground="#CCFFFFFF" FontSize="11"
+                                                                            FontWeight="Bold" Cursor="Hand"
+                                                                            Background="Transparent" BorderThickness="0"
+                                                                            VerticalAlignment="Center" Padding="0"
+                                                                            Command="{Binding DataContext.RemoveAgPathElementCommand,
+                                                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                            CommandParameter="{Binding}"
+                                                                            ToolTip="Remove this element" />
+                                                                </StackPanel>
+                                                            </Border>
+                                                            <TextBlock Text="/" Foreground="{StaticResource SecondaryTextBrush}"
+                                                                       FontSize="14" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                    <ItemsControl ItemsSource="{Binding AgAvailablePathElements}" Margin="0,0,0,4">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Cursor="Hand" Margin="0,0,6,4"
+                                                        Command="{Binding DataContext.AddAgPathElementCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="Click to add this element to the AG path">
+                                                    <Button.Template>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border x:Name="bd" CornerRadius="4" Padding="10,5"
+                                                                    Opacity="0.5" BorderThickness="1"
+                                                                    BorderBrush="{StaticResource CardBorderBrush}"
+                                                                    Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                                               FontSize="12" Margin="0,0,4,0" />
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                               FontSize="12" />
+                                                                </StackPanel>
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="bd" Property="Opacity" Value="0.85" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Button.Template>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="{Binding EditAgPathPattern}" Style="{StaticResource SecondaryText}"
+                                               FontFamily="Cascadia Code, Consolas, Courier New" FontSize="11" />
+                                </StackPanel>
+                            </Border>
 
                             <!-- Error display -->
                             <TextBlock Text="{Binding ErrorMessage}"

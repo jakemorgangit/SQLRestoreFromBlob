@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SQLRestoreFromBlob.Models;
@@ -256,5 +257,40 @@ public partial class BlobBrowserViewModel : ViewModelBase
         if (parts.Length == 2)
             return string.Equals(set.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
         return string.Equals(set.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [RelayCommand]
+    private void CopyPathHttps(BackupFileInfo? file)
+    {
+        var target = file ?? SelectedFile;
+        if (target == null || SelectedContainer == null) return;
+        try
+        {
+            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, target.BlobName);
+            Clipboard.SetText(url);
+            SetStatus("HTTPS path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyPathContainer(BackupFileInfo? file)
+    {
+        var target = file ?? SelectedFile;
+        if (target == null || SelectedContainer == null) return;
+        try
+        {
+            var containerName = SelectedContainer.ContainerName ?? "container";
+            var path = $"{containerName}/{target.BlobName}";
+            Clipboard.SetText(path);
+            SetStatus("Container path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
     }
 }

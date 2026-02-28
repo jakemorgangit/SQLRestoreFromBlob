@@ -21,6 +21,16 @@ public class BackupFileInfo
     public string? InferredServerName { get; set; }
     public string? InferredInstanceName { get; set; }
     public string? InferredDatabaseName { get; set; }
+    public string? InferredClusterName { get; set; }
+    public string? InferredAgName { get; set; }
+    /// <summary>
+    /// True when this file was identified using Ola Hallengren default AG naming (flat filename).
+    /// </summary>
+    public bool IsAgDefaultNaming { get; set; }
+    /// <summary>
+    /// When IsAgDefaultNaming, the backup set id (e.g. 20260226_200032) used for grouping stripes.
+    /// </summary>
+    public string? InferredSetId { get; set; }
     public string FileName => System.IO.Path.GetFileName(BlobName);
 
     // Populated from RESTORE HEADERONLY when connected to SQL Server

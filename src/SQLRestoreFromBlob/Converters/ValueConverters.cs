@@ -182,6 +182,23 @@ public class BoolToEyeIconConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+public class BackupSourceTypeToDisplayConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        return value?.ToString() switch
+        {
+            "Standalone" => "Standalone databases",
+            "AvailabilityGroup" => "AG databases",
+            "Mixed" => "Mix",
+            _ => value?.ToString() ?? ""
+        };
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 public class EnumToBoolConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

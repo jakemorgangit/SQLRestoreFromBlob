@@ -2,17 +2,40 @@ using System.Web;
 
 namespace SQLRestoreFromBlob.Models;
 
+/// <summary>
+/// Indicates what type of backups are stored in the container:
+/// Standalone = path-based structure only; AG = Ola default AG naming (flat filenames);
+/// Mixed = both, with separate path patterns for each.
+/// </summary>
+public enum BackupSourceType
+{
+    Standalone,
+    AvailabilityGroup,
+    Mixed
+}
+
 public class BlobContainerConfig
 {
     public string Name { get; set; } = string.Empty;
     public string ContainerUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Pattern describing the blob path structure.
+    /// Whether backups are from standalone instances, AG (Ola default naming), or both.
+    /// </summary>
+    public BackupSourceType BackupSourceType { get; set; } = BackupSourceType.Standalone;
+
+    /// <summary>
+    /// Pattern describing the blob path structure (standalone, or when Mixed this is the standalone pattern).
     /// Supported tokens: {BackupType}, {ServerName}, {InstanceName}, {DatabaseName}, {FileName}
     /// Default: {BackupType}/{ServerName}/{DatabaseName}/{FileName}
     /// </summary>
     public string PathPattern { get; set; } = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+
+    /// <summary>
+    /// When BackupSourceType is Mixed or AvailabilityGroup, optional path pattern for AG backups.
+    /// If null/empty, AG backups are assumed to use Ola default flat naming and are parsed from the filename.
+    /// </summary>
+    public string? AgPathPattern { get; set; }
 
     /// <summary>
     /// Key used to look up SAS token in Windows Credential Manager.
@@ -102,6 +125,10 @@ public class PathElement
         new() { Token = "InstanceName", DisplayName = "Instance Name", HexColor = "#9B59B6" },
         new() { Token = "DatabaseName", DisplayName = "Database Name", HexColor = "#27AE60" },
         new() { Token = "FileName", DisplayName = "File Name", HexColor = "#8890A4" },
+        // AG-specific: cluster name, AG name, or single segment "ClusterName$AgName"
+        new() { Token = "ClusterName", DisplayName = "Cluster Name", HexColor = "#E67E22" },
+        new() { Token = "AgName", DisplayName = "AG Name", HexColor = "#1ABC9C" },
+        new() { Token = "ClusterName$AgName", DisplayName = "Cluster $ AG", HexColor = "#8E44AD" },
     ];
 
     public static PathElement? FromToken(string token)

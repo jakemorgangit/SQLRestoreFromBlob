@@ -199,6 +199,16 @@
                           SelectedItem="{Binding SelectedFile}"
                           Style="{StaticResource DarkDataGrid}"
                           Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Copy path (HTTPS)"
+                                      Command="{Binding CopyPathHttpsCommand}"
+                                      CommandParameter="{Binding SelectedFile}" />
+                            <MenuItem Header="Copy path (container)"
+                                      Command="{Binding CopyPathContainerCommand}"
+                                      CommandParameter="{Binding SelectedFile}" />
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="Type" Width="110" SortMemberPath="Type">
                             <DataGridTemplateColumn.CellTemplate>

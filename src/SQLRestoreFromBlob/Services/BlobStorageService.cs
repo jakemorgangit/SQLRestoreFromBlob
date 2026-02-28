@@ -59,7 +59,47 @@ public class BlobStorageService
                 LastModified = blob.Properties.LastModified ?? DateTimeOffset.MinValue
             };
 
-            ParseBlobPath(file, config.PathPattern);
+            var pathParts = file.BlobName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var isFlatBlobName = pathParts.Length <= 1;
+            var tryAgParsing = config.BackupSourceType == BackupSourceType.AvailabilityGroup
+                || (config.BackupSourceType == BackupSourceType.Mixed && isFlatBlobName);
+
+            if (tryAgParsing)
+            {
+                var agParsed = OlaAgFileNameParser.TryParse(blob.Name);
+                if (agParsed != null)
+                {
+                    file.InferredServerName = agParsed.ServerDisplay;
+                    file.InferredDatabaseName = agParsed.DatabaseName;
+                    file.Type = agParsed.BackupType;
+                    file.InferredSetId = agParsed.SetId;
+                    file.IsAgDefaultNaming = true;
+                }
+            }
+
+            if (!file.IsAgDefaultNaming)
+            {
+                var agPattern = config.AgPathPattern ?? "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+                if (pathParts.Length > 1 && config.BackupSourceType == BackupSourceType.AvailabilityGroup)
+                {
+                    // AG container with path: e.g. BackupType/ClusterName$AGName/DatabaseName/FileName
+                    ParseBlobPath(file, agPattern);
+                    TrySetInferredSetIdFromFileName(file);
+                }
+                else if (pathParts.Length > 1 && config.BackupSourceType == BackupSourceType.Mixed)
+                {
+                    ParseBlobPath(file, config.PathPattern);
+                    if (file.Type == BackupType.Unknown || string.IsNullOrEmpty(file.InferredDatabaseName))
+                    {
+                        ParseBlobPath(file, agPattern);
+                        TrySetInferredSetIdFromFileName(file);
+                    }
+                }
+                else
+                {
+                    ParseBlobPath(file, config.PathPattern);
+                }
+            }
 
             if (file.Type == BackupType.Unknown)
                 file.Type = InferBackupTypeFromExtension(blob.Name);
@@ -136,7 +176,9 @@ public class BlobStorageService
 
         foreach (var file in files)
         {
-            var (setId, _) = BackupSet.ParseFileName(file.FileName);
+            var (setId, _) = file.IsAgDefaultNaming && !string.IsNullOrEmpty(file.InferredSetId)
+                ? (file.InferredSetId!, 0)
+                : BackupSet.ParseFileName(file.FileName);
             var key = $"{file.Type}|{file.InferredDatabaseName ?? ""}|{setId}";
 
             if (!groups.TryGetValue(key, out var list))
@@ -211,6 +253,7 @@ public class BlobStorageService
             else if (token.Equals("{ServerName}", StringComparison.OrdinalIgnoreCase))
             {
                 file.InferredServerName = value;
+                TrySplitClusterAndAg(value, file);
             }
             else if (token.Equals("{InstanceName}", StringComparison.OrdinalIgnoreCase))
             {
@@ -220,6 +263,33 @@ public class BlobStorageService
             {
                 file.InferredDatabaseName = value;
             }
+            else if (token.Equals("{ClusterName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredClusterName = value;
+            }
+            else if (token.Equals("{AgName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredAgName = value;
+            }
+            else if (token.Equals("{ClusterName$AgName}", StringComparison.OrdinalIgnoreCase))
+            {
+                file.InferredServerName = value;
+                TrySplitClusterAndAg(value, file);
+            }
+        }
+
+        if (string.IsNullOrEmpty(file.InferredServerName) && !string.IsNullOrEmpty(file.InferredClusterName) && !string.IsNullOrEmpty(file.InferredAgName))
+            file.InferredServerName = $"{file.InferredClusterName}${file.InferredAgName}";
+    }
+
+    private static void TrySplitClusterAndAg(string serverSegment, BackupFileInfo file)
+    {
+        if (string.IsNullOrEmpty(serverSegment) || serverSegment.IndexOf('$') < 0) return;
+        var parts = serverSegment.Split(new[] { '$' }, 2, StringSplitOptions.None);
+        if (parts.Length == 2)
+        {
+            file.InferredClusterName = parts[0];
+            file.InferredAgName = parts[1];
         }
     }
 
@@ -276,6 +346,16 @@ public class BlobStorageService
     {
         string[] diffIndicators = ["diff", "differential", "_diff", "-diff", ".diff"];
         return diffIndicators.Any(name.Contains);
+    }
+
+    /// <summary>
+    /// For path-based AG files, extract backup set id from the filename segment (e.g. 20260226_200032_1.bak → 20260226_200032).
+    /// </summary>
+    private static void TrySetInferredSetIdFromFileName(BackupFileInfo file)
+    {
+        var (setId, _) = BackupSet.ParseFileName(file.FileName);
+        if (BackupSet.ParseTimestamp(setId) != null)
+            file.InferredSetId = setId;
     }
 }
 

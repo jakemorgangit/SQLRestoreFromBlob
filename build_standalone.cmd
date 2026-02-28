@@ -1,0 +1,1 @@
+cd "b:\Google Drive\Projects\Github\repos\SQLRestoreFromBlob\src\SQLRestoreFromBlob" && dotnet publish -c Release -o "b:\Google Drive\Projects\Github\repos\SQLRestoreFromBlob\publish"

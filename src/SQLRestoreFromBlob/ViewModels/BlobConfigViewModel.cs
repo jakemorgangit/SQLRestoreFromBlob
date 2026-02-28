@@ -30,10 +30,24 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _editPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMixedSourceType))]
+    [NotifyPropertyChangedFor(nameof(IsAgPathSectionVisible))]
+    private BackupSourceType _editBackupSourceType = BackupSourceType.Standalone;
+
+    [ObservableProperty]
+    private string? _editAgPathPattern;
+
+    [ObservableProperty]
     private ObservableCollection<PathElement> _activePathElements = [];
 
     [ObservableProperty]
     private ObservableCollection<PathElement> _availablePathElements = [];
+
+    [ObservableProperty]
+    private ObservableCollection<PathElement> _agActivePathElements = [];
+
+    [ObservableProperty]
+    private ObservableCollection<PathElement> _agAvailablePathElements = [];
 
     [ObservableProperty]
     private bool _isEditing;
@@ -67,11 +81,23 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private ContainerSummary? _containerSummary;
 
+    /// <summary>For binding BackupSourceType options in the UI.</summary>
+    public static BackupSourceType[] BackupSourceTypeOptions { get; } =
+        Enum.GetValues<BackupSourceType>();
+
+    public bool IsMixedSourceType => EditBackupSourceType == BackupSourceType.Mixed;
+
+    /// <summary>True when AG path structure section should be shown (AG or Mixed).</summary>
+    public bool IsAgPathSectionVisible => EditBackupSourceType == BackupSourceType.AvailabilityGroup
+        || EditBackupSourceType == BackupSourceType.Mixed;
+
     private const string StoredSasSentinel = "***STORED***";
     private string _originalName = "";
     private string _originalUrl = "";
     private string _originalSas = "";
     private string _originalPattern = "";
+    private BackupSourceType _originalBackupSourceType = BackupSourceType.Standalone;
+    private string? _originalAgPathPattern;
 
     public BlobConfigViewModel(CredentialStore credentialStore, BlobStorageService blobService)
     {
@@ -109,6 +135,13 @@ public partial class BlobConfigViewModel : ViewModelBase
     partial void OnEditContainerUrlChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditSasTokenChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditPathPatternChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditBackupSourceTypeChanged(BackupSourceType value)
+    {
+        if (IsAgPathSectionVisible && AgActivePathElements.Count == 0)
+            SyncAgPathElementsFromPattern();
+        CheckForUnsavedChanges();
+    }
+    partial void OnEditAgPathPatternChanged(string? value) => CheckForUnsavedChanges();
 
     private void CheckForUnsavedChanges()
     {
@@ -120,7 +153,9 @@ public partial class BlobConfigViewModel : ViewModelBase
             EditName != _originalName ||
             EditContainerUrl != _originalUrl ||
             sasChanged ||
-            EditPathPattern != _originalPattern;
+            EditPathPattern != _originalPattern ||
+            EditBackupSourceType != _originalBackupSourceType ||
+            EditAgPathPattern != _originalAgPathPattern;
     }
 
     private void StoreOriginalValues()
@@ -129,6 +164,8 @@ public partial class BlobConfigViewModel : ViewModelBase
         _originalUrl = EditContainerUrl;
         _originalSas = HasStoredSasToken ? StoredSasSentinel : EditSasToken;
         _originalPattern = EditPathPattern;
+        _originalBackupSourceType = EditBackupSourceType;
+        _originalAgPathPattern = EditAgPathPattern;
         HasUnsavedChanges = false;
     }
 
@@ -207,6 +244,66 @@ public partial class BlobConfigViewModel : ViewModelBase
         SyncPatternFromElements();
     }
 
+    private void SyncAgPathElementsFromPattern()
+    {
+        var pattern = string.IsNullOrWhiteSpace(EditAgPathPattern)
+            ? "{BackupType}/{ServerName}/{DatabaseName}/{FileName}"
+            : EditAgPathPattern;
+        var active = PathElement.ParsePattern(pattern);
+        AgActivePathElements = new ObservableCollection<PathElement>(active);
+        RefreshAgAvailableElements();
+    }
+
+    private void SyncAgPatternFromElements()
+    {
+        EditAgPathPattern = PathElement.BuildPattern(AgActivePathElements);
+    }
+
+    private void RefreshAgAvailableElements()
+    {
+        var activeTokens = AgActivePathElements.Select(e => e.Token).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var available = PathElement.AllElements.Where(e => !activeTokens.Contains(e.Token)).ToList();
+        AgAvailablePathElements = new ObservableCollection<PathElement>(available);
+    }
+
+    [RelayCommand]
+    private void AddAgPathElement(PathElement? element)
+    {
+        if (element == null) return;
+        var insertIdx = AgActivePathElements.Count;
+        var fileNameIdx = -1;
+        for (int i = 0; i < AgActivePathElements.Count; i++)
+        {
+            if (AgActivePathElements[i].Token.Equals("FileName", StringComparison.OrdinalIgnoreCase))
+            {
+                fileNameIdx = i;
+                break;
+            }
+        }
+        if (fileNameIdx >= 0) insertIdx = fileNameIdx;
+        AgActivePathElements.Insert(insertIdx, element);
+        RefreshAgAvailableElements();
+        SyncAgPatternFromElements();
+    }
+
+    [RelayCommand]
+    private void RemoveAgPathElement(PathElement? element)
+    {
+        if (element == null || element.Token.Equals("FileName", StringComparison.OrdinalIgnoreCase)) return;
+        AgActivePathElements.Remove(element);
+        RefreshAgAvailableElements();
+        SyncAgPatternFromElements();
+    }
+
+    public void MoveAgPathElement(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= AgActivePathElements.Count) return;
+        if (toIndex < 0 || toIndex >= AgActivePathElements.Count) return;
+        if (fromIndex == toIndex) return;
+        AgActivePathElements.Move(fromIndex, toIndex);
+        SyncAgPatternFromElements();
+    }
+
     [RelayCommand]
     private void ToggleShowSasToken()
     {
@@ -220,7 +317,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditContainerUrl = string.Empty;
         EditSasToken = string.Empty;
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+        EditBackupSourceType = BackupSourceType.Standalone;
+        EditAgPathPattern = null;
         SyncPathElementsFromPattern();
+        SyncAgPathElementsFromPattern();
         HasStoredSasToken = false;
         ShowSasToken = true;
         IsNew = true;
@@ -240,7 +340,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
         EditSasToken = string.Empty; // Never show stored token; user can only replace it
         EditPathPattern = SelectedContainer.PathPattern;
+        EditBackupSourceType = SelectedContainer.BackupSourceType;
+        EditAgPathPattern = SelectedContainer.AgPathPattern;
         SyncPathElementsFromPattern();
+        SyncAgPathElementsFromPattern();
         IsNew = false;
         IsEditing = true;
         TestResult = string.Empty;
@@ -280,11 +383,14 @@ public partial class BlobConfigViewModel : ViewModelBase
                 SetError("A container with this name already exists.");
                 return;
             }
+            var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container = new BlobContainerConfig
             {
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
-                PathPattern = EditPathPattern
+                PathPattern = EditPathPattern,
+                BackupSourceType = EditBackupSourceType,
+                AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim()
             };
             Containers.Add(container);
         }
@@ -294,6 +400,9 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.Name = EditName;
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
             container.PathPattern = EditPathPattern;
+            container.BackupSourceType = EditBackupSourceType;
+            var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
+            container.AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim();
         }
 
         if (haveTokenToSave)
@@ -328,7 +437,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
+        EditBackupSourceType = SelectedContainer.BackupSourceType;
+        EditAgPathPattern = SelectedContainer.AgPathPattern;
         SyncPathElementsFromPattern();
+        SyncAgPathElementsFromPattern();
         IsNew = false;
         IsEditing = true;
         StoreOriginalValues();
